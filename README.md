@@ -24,20 +24,6 @@ into a two-mode Reticulum handheld. Standalone mode is an on-device
 Ratspeak/LXMF messenger. RNode mode makes the T-Pager a host-controlled radio
 for Ratspeak, Sideband, or another Reticulum client over BLE or USB serial.
 
-## Hardware
-
-The supported target is the **LilyGo T-Pager / T-LoRa-Pager** with:
-
-- ESP32-S3.
-- 16 MB flash and 8 MB QSPI PSRAM.
-- Built-in keyboard, scroll encoder, and 480x222 display.
-- microSD slot.
-- Integrated SX1262 LoRa radio.
-- BQ27220 fuel gauge and BQ25896 charger/power controller.
-
-The bundled RNode target is configured for the 850-950 MHz T-Pager radio
-variant.
-
 ## Install
 
 Use the Ratspeak web flasher:
