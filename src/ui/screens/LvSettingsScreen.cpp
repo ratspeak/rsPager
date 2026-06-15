@@ -176,9 +176,9 @@ bool LvSettingsScreen::settingNeedsReboot(const SettingItem& item) const {
     const auto& s = _cfg->settings();
     if (labelEq(item.label, "WiFi Mode")) return s.wifiMode != _rebootSnap.wifiMode;
     if (labelEq(item.label, "LoRa Radio")) return loraSettingsChanged();
-    if (labelEq(item.label, "Active WiFi")) return s.wifiSTASelected != _rebootSnap.wifiSTASelected;
+    if (labelEq(item.label, "WiFi Profile")) return s.wifiSTASelected != _rebootSnap.wifiSTASelected;
     if (isWiFiSSIDLabel(item.label) || isWiFiPasswordLabel(item.label)) return interfaceSettingsChanged();
-    if (labelEq(item.label, "WiFi Scan") || labelEq(item.label, "Forget WiFi")) return interfaceSettingsChanged();
+    if (labelEq(item.label, "Scan Networks") || labelEq(item.label, "Forget Network")) return interfaceSettingsChanged();
     if (labelEq(item.label, "TCP Relay") || labelEq(item.label, "Relay Host") ||
         labelEq(item.label, "Relay Port")) return tcpSettingsChanged();
     if (labelEq(item.label, "LAN Discovery")) return s.autoIfaceEnabled != _rebootSnap.autoIfaceEnabled;
@@ -191,7 +191,7 @@ bool LvSettingsScreen::categoryNeedsReboot(int catIdx) const {
     if (labelEq(_categories[catIdx].name, "LoRa")) {
         return loraSettingsChanged();
     }
-    if (labelEq(_categories[catIdx].name, "Interfaces")) {
+    if (labelEq(_categories[catIdx].name, "Network")) {
         return interfaceSettingsChanged() || tcpSettingsChanged();
     }
     if (labelEq(_categories[catIdx].name, "Storage & Maintenance")) {
@@ -661,7 +661,7 @@ void LvSettingsScreen::buildItems() {
             return label;
         }});
 
-    // Interfaces
+    // Network
     int netStart = idx;
     _items.push_back({"WiFi Mode", SettingType::ENUM_CHOICE,
         [&s]() { return (int)s.wifiMode; },
@@ -671,7 +671,19 @@ void LvSettingsScreen::buildItems() {
         },
         nullptr, 0, 2, 1, {"Off", "Hotspot", "Client"}});
     idx++;
-    _items.push_back({"Active WiFi", SettingType::INTEGER,
+    {
+        SettingItem scanItem;
+        scanItem.label = "Scan Networks";
+        scanItem.type = SettingType::ACTION;
+        scanItem.formatter = [](int) { return String("[Enter]"); };
+        scanItem.action = [this, &s]() {
+            _wifiTargetSlot = selectedWiFiSlot(s);
+            showWifiPicker();
+        };
+        _items.push_back(scanItem);
+        idx++;
+    }
+    _items.push_back({"WiFi Profile", SettingType::INTEGER,
         [&s]() { return (int)selectedWiFiSlot(s) + 1; },
         [&s](int v) { s.wifiSTASelected = (uint8_t)constrain(v - 1, 0, (int)WIFI_STA_MAX_NETWORKS - 1); },
         [&s](int v) { return wifiProfileValue(s, constrain(v - 1, 0, (int)WIFI_STA_MAX_NETWORKS - 1)); },
@@ -715,20 +727,8 @@ void LvSettingsScreen::buildItems() {
         idx++;
     }
     {
-        SettingItem scanItem;
-        scanItem.label = "WiFi Scan";
-        scanItem.type = SettingType::ACTION;
-        scanItem.formatter = [](int) { return String("[Enter]"); };
-        scanItem.action = [this, &s]() {
-            _wifiTargetSlot = selectedWiFiSlot(s);
-            showWifiPicker();
-        };
-        _items.push_back(scanItem);
-        idx++;
-    }
-    {
         SettingItem forgetItem;
-        forgetItem.label = "Forget WiFi";
+        forgetItem.label = "Forget Network";
         forgetItem.type = SettingType::ACTION;
         forgetItem.formatter = [&s](int) {
             String ssid = selectedWiFiSSID(s);
@@ -808,7 +808,7 @@ void LvSettingsScreen::buildItems() {
         [&s](int v) { s.autoIfaceEnabled = (v != 0); },
         [](int v) { return String(onOff(v != 0)); }});
     idx++;
-    _categories.push_back({"Interfaces", netStart, idx - netStart,
+    _categories.push_back({"Network", netStart, idx - netStart,
         [this, &s]() {
             if (interfaceSettingsChanged() || tcpSettingsChanged()) return String("Saved - reboot to apply");
             String summary = wifiModeLabel(s.wifiMode);
