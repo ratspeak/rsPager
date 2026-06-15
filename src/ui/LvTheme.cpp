@@ -299,7 +299,7 @@ void init(lv_disp_t* disp) {
     // Apply screen style to default theme
     lv_obj_add_style(lv_scr_act(), &s_screen, 0);
 
-    Serial.println("[LVGL] Ratpager field-console theme initialized");
+    Serial.println("[LVGL] rsPager field-console theme initialized");
 }
 
 void refresh() {

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // =============================================================================
-// Ratpager design constants
+// rsPager design constants
 // Field-console palette tuned for the wide T-Pager LVGL surface.
 // Colors are runtime-switchable (Dark = original palette, Light = derived);
 // the value tables live in Theme.cpp. Identifiers keep their original

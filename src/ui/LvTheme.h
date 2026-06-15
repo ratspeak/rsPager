@@ -2,7 +2,7 @@
 
 #include <lvgl.h>
 
-// Ratpager LVGL theme: compact field-console styles for LVGL 8.3.
+// rsPager LVGL theme: compact field-console styles for LVGL 8.3.
 namespace LvTheme {
 
 void init(lv_disp_t* disp);

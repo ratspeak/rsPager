@@ -95,7 +95,7 @@ void LvNameInputScreen::createUI(lv_obj_t* parent) {
     lv_group_focus_obj(_textarea);
 
     lv_obj_t* note = makeLabel(parent,
-        "Leave blank to generate a Ratpager name from this identity.",
+        "Leave blank to generate an rsPager name from this identity.",
         &lv_font_ratdeck_12, Theme::TEXT_SECONDARY, 260, LV_TEXT_ALIGN_CENTER);
     lv_obj_align(note, LV_ALIGN_TOP_MID, 0, 154);
 

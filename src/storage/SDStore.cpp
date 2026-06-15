@@ -223,7 +223,7 @@ bool SDStore::hasExistingData() {
 
 bool SDStore::formatForRatpager() {
     if (!_ready) return false;
-    Serial.println("[SD] Creating Ratpager directory structure...");
+    Serial.println("[SD] Creating rsPager directory structure...");
     bool ok = true;
     ok &= ensureDir(SD_PATH_ROOT);
     ok &= ensureDir(SD_PATH_CONFIG_DIR);

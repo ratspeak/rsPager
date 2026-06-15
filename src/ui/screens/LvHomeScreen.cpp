@@ -305,7 +305,7 @@ void LvHomeScreen::refreshUI() {
         String dh = _rns->destinationHashHex();
         displayName = "Ratspeak.org-" + dh.substring(0, 3);
     } else {
-        displayName = "Ratpager";
+        displayName = "rsPager";
     }
     lv_label_set_text(_lblName, displayName.c_str());
 

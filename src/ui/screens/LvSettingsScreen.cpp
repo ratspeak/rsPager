@@ -203,20 +203,20 @@ bool LvSettingsScreen::categoryNeedsReboot(int catIdx) const {
 bool LvSettingsScreen::confirmableAction(const SettingItem& item) const {
         return labelEq(item.label, "Developer Radio Controls")
         || labelEq(item.label, "Format SD Card")
-        || labelEq(item.label, "Erase Ratpager SD Data")
+        || labelEq(item.label, "Erase rsPager SD Data")
         || labelEq(item.label, "Erase Device");
 }
 
 bool LvSettingsScreen::armedAction(const SettingItem& item) const {
     return (_confirmingInitSD && labelEq(item.label, "Format SD Card")) ||
-        (_confirmingWipeSD && labelEq(item.label, "Erase Ratpager SD Data")) ||
+        (_confirmingWipeSD && labelEq(item.label, "Erase rsPager SD Data")) ||
         (_confirmingReset && labelEq(item.label, "Erase Device")) ||
         (_confirmingDevMode && labelEq(item.label, "Developer Radio Controls"));
 }
 
 bool LvSettingsScreen::destructiveAction(const SettingItem& item) const {
     return labelEq(item.label, "Format SD Card")
-        || labelEq(item.label, "Erase Ratpager SD Data")
+        || labelEq(item.label, "Erase rsPager SD Data")
         || labelEq(item.label, "Erase Device");
 }
 
@@ -267,7 +267,7 @@ void LvSettingsScreen::runWipeSD() {
         rebuildItemList();
         return;
     }
-    if (_ui) _ui->lvStatusBar().showToast("Erasing Ratpager SD data...", 2000);
+    if (_ui) _ui->lvStatusBar().showToast("Erasing rsPager SD data...", 2000);
     bool ok = _sd->wipeRatpager();
     if (_ui) _ui->lvStatusBar().showToast(ok ? "SD data erased" : "SD erase failed", 1500);
     rebuildItemList();
@@ -1005,7 +1005,7 @@ void LvSettingsScreen::buildItems() {
     }
     {
         SettingItem wipeSD;
-        wipeSD.label = "Erase Ratpager SD Data";
+        wipeSD.label = "Erase rsPager SD Data";
         wipeSD.type = SettingType::ACTION;
         wipeSD.formatter = [this](int) {
             if (!_sd || !_sd->isReady()) return String("No Card");
@@ -1939,7 +1939,7 @@ bool LvSettingsScreen::handleLongPress() {
         runFormatSD();
         return true;
     }
-    if (_confirmingWipeSD && labelEq(item.label, "Erase Ratpager SD Data")) {
+    if (_confirmingWipeSD && labelEq(item.label, "Erase rsPager SD Data")) {
         runWipeSD();
         return true;
     }

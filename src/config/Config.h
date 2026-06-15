@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Ratpager — Compile-Time Configuration
+// rsPager - Compile-Time Configuration
 // =============================================================================
 
 #define RATPAGER_VERSION_MAJOR  1
@@ -10,7 +10,7 @@
 #define RATPAGER_VERSION_STRING "1.0.0"
 
 // Keep the proven Ratdeck application layer compiling while the T-Pager target
-// is split out. Public/user-facing strings use Ratpager below.
+// is split out. Legacy storage paths keep the ratpager namespace for migration.
 #define RATDECK_VERSION_MAJOR  RATPAGER_VERSION_MAJOR
 #define RATDECK_VERSION_MINOR  RATPAGER_VERSION_MINOR
 #define RATDECK_VERSION_PATCH  RATPAGER_VERSION_PATCH

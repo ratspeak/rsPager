@@ -37,7 +37,7 @@ void WiFiInterface::startAP() {
     if (_apSSID.isEmpty()) {
         uint32_t chip = ESP.getEfuseMac() & 0xFFFF;
         char ssid[32];
-        snprintf(ssid, sizeof(ssid), "ratpager-%04x", chip);
+        snprintf(ssid, sizeof(ssid), "rspager-%04x", chip);
         _apSSID = ssid;
     }
 

@@ -349,7 +349,7 @@ void ReticulumManager::loop() {
 
 // Synchronous persist — one cycle per call to spread I/O across intervals.
 // Runs on core 1 (main loop) to avoid data races with microReticulum's
-// single-threaded transport state. Ratpager is an endpoint, not a transport
+// single-threaded transport state. rsPager is an endpoint, not a transport
 // node, so path tables are intentionally not persisted across boots.
 void ReticulumManager::persistData() {
     unsigned long start = millis();

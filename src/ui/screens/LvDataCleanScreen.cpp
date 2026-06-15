@@ -72,7 +72,7 @@ void LvDataCleanScreen::createUI(lv_obj_t* parent) {
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 28);
 
     lv_obj_t* msg = makeLabel(parent,
-        "Ratpager found older data on the SD card.",
+        "rsPager found older data on the SD card.",
         &lv_font_ratdeck_12, Theme::TEXT_PRIMARY, 268, LV_TEXT_ALIGN_CENTER);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 58);
 

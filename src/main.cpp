@@ -1,5 +1,5 @@
 // =============================================================================
-// Ratpager — Main Entry Point
+// rsPager - Main Entry Point
 // LilyGo T-Pager: LovyanGFX + microReticulum + LXMF Messaging
 // =============================================================================
 
@@ -465,7 +465,7 @@ void onHotkeyAutoIface() {
 }
 void onHotkeyDiag() {
     Serial.println("=== DIAGNOSTIC DUMP ===");
-    Serial.printf("Device: Ratpager T-Pager\n");
+    Serial.printf("Device: rsPager T-Pager\n");
     Serial.printf("Identity: %s\n", rns.identityHash().c_str());
     Serial.printf("Transport: %s\n", rns.isTransportActive() ? "ACTIVE" : "OFFLINE");
     Serial.printf("Paths: %d  Links: %d\n", (int)rns.pathCount(), (int)rns.linkCount());
@@ -1110,7 +1110,7 @@ void setup() {
     delay(100);
     Serial.println();
     Serial.println("=================================");
-    Serial.printf("  Ratpager v%s\n", RATPAGER_VERSION_STRING);
+    Serial.printf("  rsPager v%s\n", RATPAGER_VERSION_STRING);
     Serial.println("  LilyGo T-Pager");
     Serial.println("=================================");
 
@@ -1916,7 +1916,7 @@ void setup() {
         keyboard.backlightOn();
     }
 
-    Serial.println("[BOOT] Ratpager ready");
+    Serial.println("[BOOT] rsPager ready");
     Serial.printf("[BOOT] Summary: radio=%s flash=%s sd=%s\n",
                   radioOnline ? "ONLINE" : "OFFLINE",
                   flash.isReady() ? "OK" : "FAIL",

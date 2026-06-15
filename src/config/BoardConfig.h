@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Ratpager — LilyGo T-Pager / T-LoRa-Pager Pin Definitions
+// rsPager - LilyGo T-Pager / T-LoRa-Pager Pin Definitions
 // =============================================================================
 
 // --- Power / IO Expander (XL9555, I2C 0x20) ---
