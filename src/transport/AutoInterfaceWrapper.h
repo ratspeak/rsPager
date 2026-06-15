@@ -1,0 +1,45 @@
+#pragma once
+
+#include <Arduino.h>
+#include <Interfaces/AutoInterface.h>
+
+#include <memory>
+
+/*
+ * Firmware-side glue around RNS::AutoInterface.  Handles the
+ * WiFi-STA-driven start/stop lifecycle and exposes a small surface
+ * (peer_count, multicast_address, online flag) for the UI / heartbeat.
+ *
+ * Use:
+ *   1. wifi STA connects -> resolve link-local IPv6 + scope id
+ *   2. wrapper.start(group_id, max_peers, link_local, scope_id)
+ *   3. wrapper.loop() each main-loop tick
+ *   4. periodically poll WiFi.localIPv6() and call notifyLinkChange() -
+ *      catches SLAAC privacy-address rotation while STA stays associated;
+ *      idempotent at the library layer (no socket churn unless changed)
+ *   5. on STA disconnect -> wrapper.stop()
+ */
+class AutoInterfaceWrapper {
+public:
+	bool start(const char* group_id,
+			   uint8_t max_peers,
+			   const String& link_local_addr,
+			   uint32_t scope_id);
+	void stop();
+	void loop();
+	void notifyLinkChange(const String& link_local_addr, uint32_t scope_id);
+
+	bool   isOnline()    const;
+	size_t peerCount()   const;
+	const std::string& multicastAddress() const;
+
+private:
+	std::shared_ptr<RNS::AutoInterface> _impl;
+	RNS::Interface _wrapper{RNS::Type::NONE};
+	std::string    _empty_addr;  // sentinel returned when not started
+	String         _groupId;
+	String         _linkLocalAddr;
+	uint32_t       _scopeId = 0;
+	uint8_t        _maxPeers = 0;
+	bool _started = false;
+};
