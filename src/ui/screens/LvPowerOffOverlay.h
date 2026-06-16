@@ -2,7 +2,7 @@
 
 #include "ui/UIManager.h"
 
-// Power-off confirm dialog — shown on a BOOT press.
+// Power-off confirm dialog — shown on a BOOT hold.
 class LvPowerOffOverlay {
 public:
     void create();

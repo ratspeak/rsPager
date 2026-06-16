@@ -36,43 +36,11 @@ int clampTimezoneIndex(int idx) {
     return idx;
 }
 
-lv_obj_t* makeActionButton(lv_obj_t* parent, const char* text, lv_coord_t x,
-                           lv_coord_t y, lv_coord_t w, lv_coord_t h,
-                           bool primary) {
-    lv_obj_t* btn = lv_btn_create(parent);
-    lv_obj_set_pos(btn, x, y);
-    lv_obj_set_size(btn, w, h);
-    lv_obj_add_style(btn, LvTheme::styleBtn(), 0);
-    lv_obj_add_style(btn, LvTheme::styleBtnFocused(), LV_STATE_FOCUSED);
-    lv_obj_add_style(btn, LvTheme::styleBtnPressed(), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(btn,
-        lv_color_hex(primary ? Theme::PRIMARY_SUBTLE : Theme::BG_ELEVATED), 0);
-    lv_obj_set_style_border_color(btn,
-        lv_color_hex(primary ? Theme::PRIMARY : Theme::BORDER), 0);
-    lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_set_style_radius(btn, 4, 0);
-    lv_obj_set_style_pad_all(btn, 0, 0);
-
-    lv_obj_t* lbl = lv_label_create(btn);
-    lv_obj_set_style_text_font(lbl, &lv_font_ratdeck_12, 0);
-    lv_obj_set_style_text_color(lbl,
-        lv_color_hex(primary ? Theme::ACCENT : Theme::TEXT_PRIMARY), 0);
-    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(lbl, w - 10);
-    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(lbl, text);
-    lv_obj_center(lbl);
-    return btn;
-}
-
 }  // namespace
 
 void LvTimezoneScreen::createUI(lv_obj_t* parent) {
     _screen = parent;
     _roller = nullptr;
-    _upButton = nullptr;
-    _downButton = nullptr;
-    _doneButton = nullptr;
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(parent, lv_color_hex(Theme::BG), 0);
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
@@ -126,27 +94,6 @@ void LvTimezoneScreen::createUI(lv_obj_t* parent) {
     // Add to focus group for encoder navigation
     lv_group_add_obj(LvInput::group(), _roller);
     lv_group_focus_obj(_roller);
-
-    _upButton = makeActionButton(parent, "UP", 22, 194, 74, 34, false);
-    lv_obj_add_event_cb(_upButton, [](lv_event_t* e) {
-        auto* self = static_cast<LvTimezoneScreen*>(lv_event_get_user_data(e));
-        if (!self) return;
-        self->stepSelection(-1);
-    }, LV_EVENT_CLICKED, this);
-
-    _doneButton = makeActionButton(parent, "DONE", 106, 194, 108, 34, true);
-    lv_obj_add_event_cb(_doneButton, [](lv_event_t* e) {
-        auto* self = static_cast<LvTimezoneScreen*>(lv_event_get_user_data(e));
-        if (!self) return;
-        self->submit(false);
-    }, LV_EVENT_CLICKED, this);
-
-    _downButton = makeActionButton(parent, "DOWN", 224, 194, 74, 34, false);
-    lv_obj_add_event_cb(_downButton, [](lv_event_t* e) {
-        auto* self = static_cast<LvTimezoneScreen*>(lv_event_get_user_data(e));
-        if (!self) return;
-        self->stepSelection(1);
-    }, LV_EVENT_CLICKED, this);
 }
 
 void LvTimezoneScreen::stepSelection(int delta) {

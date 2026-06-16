@@ -73,7 +73,7 @@ void LvHelpOverlay::create() {
     addHelpRow(_overlay, "Ctrl+S", "Settings");
     addHelpRow(_overlay, "Ctrl+A", "Announce");
     addHelpRow(_overlay, "Ctrl+D/I/T/R", "Diagnostics tools");
-    addHelpRow(_overlay, "Hold BOOT", "Power off (wake: hold PWR)");
+    addHelpRow(_overlay, "BOOT", "Tap sleep; hold power off");
 
     lv_obj_t* footer = makeLabel(_overlay, "Any key or tap closes",
                                  &lv_font_ratdeck_10, Theme::TEXT_MUTED,

@@ -58,7 +58,8 @@ contacts.
 - Add contacts: select a discovered peer, then open or save the chat.
 - Send messages: open a chat, type, and press Enter.
 - Delivery color: yellow while sending, green after delivery confirmation.
-- Power off: press BOOT, then confirm. Power back on by holding PWR for about
+- Sleep screen: tap BOOT. Wake with any key or the encoder click.
+- Power off: hold BOOT, then confirm. Power back on by holding PWR for about
   one second or plugging in USB. Holding BOOT for six seconds forces off without
   the confirm; holding PWR for about 12 seconds hard power-cycles in hardware.
 

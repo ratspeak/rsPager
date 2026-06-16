@@ -24,7 +24,9 @@ public:
     // never drops, so this parks in deep sleep with BOOT wake and the off
     // completes on unplug. Does not return.
     void powerOff();
-    // One-shot: BOOT was pressed while the screen was on (show confirm UI).
+    // One-shot: BOOT was short-pressed while the screen was on (sleep screen).
+    bool screenSleepGestureFired();
+    // One-shot: BOOT was held while the screen was on (show confirm UI).
     // Holding through POWEROFF_FORCE_MS powers off without UI — frozen-screen
     // escape hatch; skips state flush like a battery pull.
     bool powerOffGestureFired();
@@ -66,10 +68,12 @@ private:
     void pollBootButton();
     static void disablePeripherals();
 
+    static constexpr unsigned long POWEROFF_PROMPT_MS = 1200;
     static constexpr unsigned long POWEROFF_FORCE_MS = 6000;
     bool _btnWasDown = false;
     bool _btnFromScreenOn = false;
     bool _gestureLatched = false;
+    bool _screenSleepPending = false;
     bool _gesturePending = false;
     unsigned long _btnDownMs = 0;
 

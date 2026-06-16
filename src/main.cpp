@@ -1961,7 +1961,7 @@ void loop() {
         }
     }
 
-    // 2.5. BOOT press → power-off confirm (continued hold force-cuts in HAL)
+    // 2.5. BOOT hold → power-off confirm (continued hold force-cuts in HAL)
     if (powerMgr.powerOffGestureFired()) {
         powerMgr.activity();
         lvPowerOffOverlay.show(powerMgr.vbusPresent());
@@ -2244,6 +2244,12 @@ void loop() {
 
     // 10. Power management
     powerMgr.loop();
+    if (powerMgr.screenSleepGestureFired()) {
+        if (lvPowerOffOverlay.isVisible()) {
+            lvPowerOffOverlay.hide();
+        }
+        powerMgr.forceScreenOff();
+    }
 
     // 11. Periodic status bar update (1 Hz) + render
     if (millis() - lastStatusUpdate >= STATUS_UPDATE_MS) {

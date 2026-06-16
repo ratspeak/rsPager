@@ -238,6 +238,9 @@ void Power::setKbBrightness(uint8_t percent, bool apply) {
 void Power::pollBootButton() {
     bool down = digitalRead(BTN_BOOT) == LOW;
     if (!down) {
+        if (_btnWasDown && _btnFromScreenOn && !_gestureLatched) {
+            _screenSleepPending = true;
+        }
         _btnWasDown = false;
         _btnFromScreenOn = false;
         _gestureLatched = false;
@@ -248,8 +251,7 @@ void Power::pollBootButton() {
         _btnFromScreenOn = isScreenOn();
         _btnDownMs = millis();
         if (_btnFromScreenOn) {
-            _gestureLatched = true;
-            _gesturePending = true;
+            _gestureLatched = false;
         } else {
             activity();
         }
@@ -259,10 +261,16 @@ void Power::pollBootButton() {
     if (held >= POWEROFF_FORCE_MS) {
         Serial.println("[POWER] BOOT force-hold");
         powerOff();
-    } else if (_btnFromScreenOn && !_gestureLatched) {
+    } else if (_btnFromScreenOn && !_gestureLatched && held >= POWEROFF_PROMPT_MS) {
         _gestureLatched = true;
         _gesturePending = true;
     }
+}
+
+bool Power::screenSleepGestureFired() {
+    bool fired = _screenSleepPending;
+    _screenSleepPending = false;
+    return fired;
 }
 
 bool Power::powerOffGestureFired() {
