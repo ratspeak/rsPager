@@ -45,6 +45,8 @@ private:
     void deleteFocusedConversation();
     bool isPeerSavedContact(const std::string& peerHex) const;
     int savedContactCount() const;
+    void showEmptyState();
+    void hideEmptyState();
 
     LXMFManager* _lxmf = nullptr;
     AnnounceManager* _am = nullptr;

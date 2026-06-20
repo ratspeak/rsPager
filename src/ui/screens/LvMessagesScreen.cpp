@@ -18,6 +18,8 @@ constexpr int kRowH = 58;
 constexpr int kRailW = 5;
 constexpr int kChatAvatar = 32;
 constexpr int kChatTextX = 54;
+constexpr int kEmptyW = 272;
+constexpr int kEmptyH = 104;
 bool isPendingStatus(LXMFStatus status) {
     return status == LXMFStatus::QUEUED || status == LXMFStatus::SENDING;
 }
@@ -100,11 +102,15 @@ bool formatClock(double ts, char* out, size_t outLen) {
 
 void LvMessagesScreen::createUI(lv_obj_t* parent) {
     _screen = parent;
+    lv_obj_set_layout(parent, 0);
+    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_scroll_to_x(parent, 0, LV_ANIM_OFF);
+    lv_obj_scroll_to_y(parent, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(parent, lv_color_hex(Theme::BG), 0);
     lv_obj_set_style_pad_all(parent, 0, 0);
 
     _lblEmpty = lv_obj_create(parent);
-    lv_obj_set_size(_lblEmpty, 272, 104);
+    lv_obj_set_size(_lblEmpty, kEmptyW, kEmptyH);
     lv_obj_set_style_bg_color(_lblEmpty, lv_color_hex(Theme::BG_ELEVATED), 0);
     lv_obj_set_style_bg_opa(_lblEmpty, LV_OPA_80, 0);
     lv_obj_set_style_border_color(_lblEmpty, lv_color_hex(Theme::BORDER), 0);
@@ -192,13 +198,11 @@ void LvMessagesScreen::rebuildList() {
     _avatarBuffers.clear();
 
     if (count == 0) {
-        lv_obj_clear_flag(_lblEmpty, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(_list, LV_OBJ_FLAG_HIDDEN);
+        showEmptyState();
         return;
     }
 
-    lv_obj_add_flag(_lblEmpty, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(_list, LV_OBJ_FLAG_HIDDEN);
+    hideEmptyState();
 
     // Build sorted conversation info
     _sortedConvs.reserve(count);
@@ -383,6 +387,28 @@ void LvMessagesScreen::rebuildList() {
     if (elapsed > 25) {
         Serial.printf("[PERF] Chats rebuild: %d convs in %lums\n",
                       count, (unsigned long)elapsed);
+    }
+}
+
+void LvMessagesScreen::showEmptyState() {
+    if (_screen) {
+        lv_obj_set_layout(_screen, 0);
+        lv_obj_scroll_to_x(_screen, 0, LV_ANIM_OFF);
+        lv_obj_scroll_to_y(_screen, 0, LV_ANIM_OFF);
+    }
+    if (_lblEmpty) {
+        lv_obj_align(_lblEmpty, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_clear_flag(_lblEmpty, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(_lblEmpty);
+    }
+    if (_list) lv_obj_add_flag(_list, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LvMessagesScreen::hideEmptyState() {
+    if (_lblEmpty) lv_obj_add_flag(_lblEmpty, LV_OBJ_FLAG_HIDDEN);
+    if (_list) {
+        lv_obj_clear_flag(_list, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(_list);
     }
 }
 
