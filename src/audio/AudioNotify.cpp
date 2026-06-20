@@ -1,6 +1,7 @@
 // Audio output for T-Pager via I2S codec/amplifier path
 #include "AudioNotify.h"
 #include "config/BoardConfig.h"
+#include "hal/Power.h"
 #include <Wire.h>
 #include <driver/i2s.h>
 #include <math.h>
@@ -89,12 +90,16 @@ void AudioNotify::begin() {
     _codecReady = beginCodec();
     if (!_codecReady) {
         Serial.println("[AUDIO] ES8311 codec init failed");
+    } else {
+        Power::setSpeakerPower(_enabled && _volume > 0);
+        delay(20);
     }
 }
 
 void AudioNotify::end() {
     if (_codecReady) {
         setCodecMute(true);
+        Power::setSpeakerPower(false);
         _codecReady = false;
     }
     if (_i2sReady) {
@@ -105,7 +110,10 @@ void AudioNotify::end() {
 
 void AudioNotify::setEnabled(bool enabled) {
     _enabled = enabled;
-    if (_codecReady) setCodecMute(!enabled || _volume == 0);
+    if (_codecReady) {
+        setCodecMute(!enabled || _volume == 0);
+        Power::setSpeakerPower(_enabled && _volume > 0);
+    }
 }
 
 void AudioNotify::setVolume(uint8_t vol) {
@@ -113,6 +121,7 @@ void AudioNotify::setVolume(uint8_t vol) {
     if (_codecReady) {
         setCodecVolume(_volume);
         setCodecMute(!_enabled || _volume == 0);
+        Power::setSpeakerPower(_enabled && _volume > 0);
     }
 }
 

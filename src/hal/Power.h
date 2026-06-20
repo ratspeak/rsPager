@@ -7,6 +7,7 @@ class Power {
 public:
     // Enable peripheral rails through the XL9555 expander after I2C is online.
     static void enablePeripherals();
+    static bool setSpeakerPower(bool enable);
 
     void begin();
     void loop();

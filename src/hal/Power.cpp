@@ -104,15 +104,38 @@ void Power::enablePeripherals() {
     xlRead16(XL_REG_OUTPUT_0, outputs);
     xlRead16(XL_REG_CONFIG_0, config);
 
-    const uint16_t rails = peripheralRails();
+    const uint16_t speaker = xlBit(XL9555_AMP_EN);
+    const uint16_t rails = peripheralRails() & ~speaker;
 
     outputs |= rails;
-    config &= ~rails;                // 0 = output, 1 = input on XL9555/PCA9555
+    outputs &= ~speaker;
+    config &= ~(rails | speaker);    // 0 = output, 1 = input on XL9555/PCA9555
     config |= xlBit(XL9555_SD_DET);  // card detect remains input
 
     bool ok = xlWrite16(XL_REG_OUTPUT_0, outputs) && xlWrite16(XL_REG_CONFIG_0, config);
     Serial.printf("[POWER] XL9555 peripheral rails %s\n", ok ? "enabled" : "not detected");
     delay(20);
+}
+
+bool Power::setSpeakerPower(bool enable) {
+    uint16_t outputs = 0;
+    uint16_t config = 0xFFFF;
+    if (!xlRead16(XL_REG_OUTPUT_0, outputs) || !xlRead16(XL_REG_CONFIG_0, config)) {
+        Serial.printf("[POWER] Speaker amp %s failed\n", enable ? "enable" : "disable");
+        return false;
+    }
+
+    const uint16_t speaker = xlBit(XL9555_AMP_EN);
+    if (enable) {
+        outputs |= speaker;
+    } else {
+        outputs &= ~speaker;
+    }
+    config &= ~speaker;
+
+    bool ok = xlWrite16(XL_REG_OUTPUT_0, outputs) && xlWrite16(XL_REG_CONFIG_0, config);
+    Serial.printf("[POWER] Speaker amp %s%s\n", enable ? "enabled" : "disabled", ok ? "" : " failed");
+    return ok;
 }
 
 void Power::begin() {
