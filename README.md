@@ -6,7 +6,7 @@
 
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#install)
 [![Model](https://img.shields.io/badge/model-LilyGo%20T--Pager-success.svg)](https://wiki.lilygo.cc/products/t-lora-series/t-lora-pager/)
-[![Version](https://img.shields.io/badge/version-1.0.1-success.svg)](https://github.com/ratspeak/rsPager/releases)
+[![Version](https://img.shields.io/badge/version-1.0.2-success.svg)](https://github.com/ratspeak/rsPager/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 [Ratspeak](https://github.com/ratspeak/Ratspeak) |
@@ -18,7 +18,7 @@
 
 ---
 
-rsPager beta v1.0.1 turns a
+rsPager beta v1.0.2 turns a
 [LilyGo T-Pager / T-LoRa-Pager](https://wiki.lilygo.cc/products/t-lora-series/t-lora-pager/)
 into a two-mode Reticulum handheld. Standalone mode is an on-device
 Ratspeak/LXMF messenger. RNode mode makes the T-Pager a host-controlled radio
