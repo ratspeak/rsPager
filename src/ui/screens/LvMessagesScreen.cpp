@@ -166,8 +166,10 @@ void LvMessagesScreen::refreshUI() {
     int unread = _lxmf->unreadCount();
     int queued = _lxmf->queuedCount();
     uint32_t revision = _lxmf->storeRevision();
+    int savedContacts = savedContactCount();
     if (count != _lastConvCount || unread != _lastUnreadTotal ||
-        queued != _lastQueuedCount || revision != _lastStoreRevision) {
+        queued != _lastQueuedCount || revision != _lastStoreRevision ||
+        savedContacts != _lastSavedContactCount) {
         rebuildList();
     }
 }
@@ -182,6 +184,7 @@ void LvMessagesScreen::rebuildList() {
     _lastUnreadTotal = _lxmf->unreadCount();
     _lastQueuedCount = _lxmf->queuedCount();
     _lastStoreRevision = _lxmf->storeRevision();
+    _lastSavedContactCount = savedContactCount();
     _sortedPeers.clear();
     _sortedConvs.clear();
 
@@ -389,6 +392,21 @@ int LvMessagesScreen::getFocusedPeerIdx() const {
     return (int)(intptr_t)lv_obj_get_user_data(focused);
 }
 
+bool LvMessagesScreen::isPeerSavedContact(const std::string& peerHex) const {
+    if (!_am) return false;
+    const DiscoveredNode* node = _am->findNodeByHex(peerHex);
+    return node && node->saved;
+}
+
+int LvMessagesScreen::savedContactCount() const {
+    if (!_am) return 0;
+    int count = 0;
+    for (const auto& node : _am->nodes()) {
+        if (node.saved) count++;
+    }
+    return count;
+}
+
 void LvMessagesScreen::hideActionMenu() {
     if (_actionOverlay) {
         lv_obj_del_async(_actionOverlay);
@@ -402,6 +420,7 @@ void LvMessagesScreen::hideActionMenu() {
     _lpPeerIdx = -1;
     _menuIdx = 0;
     _menuCount = 0;
+    for (int i = 0; i < 3; i++) _menuActions[i] = CHAT_MENU_CANCEL;
 }
 
 void LvMessagesScreen::rebuildActionOverlay(const char* title, const char* const* labels, int count) {
@@ -463,13 +482,39 @@ void LvMessagesScreen::rebuildActionOverlay(const char* title, const char* const
     }
 }
 
+void LvMessagesScreen::rebuildChatActionMenu() {
+    if (_lpPeerIdx < 0 || _lpPeerIdx >= (int)_sortedPeers.size()) return;
+
+    const bool canAddFriend = _am && !isPeerSavedContact(_sortedPeers[_lpPeerIdx]);
+    const char* labels[3] = {};
+    int count = 0;
+
+    if (canAddFriend) {
+        labels[count] = "Add Friend";
+        _menuActions[count++] = CHAT_MENU_ADD_FRIEND;
+    }
+
+    labels[count] = "Delete Chat";
+    _menuActions[count++] = CHAT_MENU_DELETE_CHAT;
+
+    labels[count] = "Cancel";
+    _menuActions[count++] = CHAT_MENU_CANCEL;
+
+    for (int i = count; i < 3; i++) {
+        _menuActions[i] = CHAT_MENU_CANCEL;
+    }
+    if (_menuIdx >= count) _menuIdx = count - 1;
+    if (_menuIdx < 0) _menuIdx = 0;
+
+    rebuildActionOverlay("CHAT ACTION", labels, count);
+}
+
 void LvMessagesScreen::showActionMenu(int peerIdx) {
     if (!_lxmf || peerIdx < 0 || peerIdx >= (int)_sortedPeers.size()) return;
     _lpPeerIdx = peerIdx;
     _lpState = LP_MENU;
     _menuIdx = 0;
-    static const char* labels[] = {"Add Friend", "Delete Chat", "Cancel"};
-    rebuildActionOverlay("CHAT ACTION", labels, 3);
+    rebuildChatActionMenu();
 }
 
 void LvMessagesScreen::showDeleteConfirm() {
@@ -479,8 +524,8 @@ void LvMessagesScreen::showDeleteConfirm() {
     rebuildActionOverlay("DELETE CHAT?", labels, 2);
 }
 
-void LvMessagesScreen::addFocusedPeerToContacts() {
-    if (!_am || _lpPeerIdx < 0 || _lpPeerIdx >= (int)_sortedPeers.size()) return;
+bool LvMessagesScreen::addFocusedPeerToContacts() {
+    if (!_am || _lpPeerIdx < 0 || _lpPeerIdx >= (int)_sortedPeers.size()) return false;
     const auto& peerHex = _sortedPeers[_lpPeerIdx];
     const DiscoveredNode* existing = _am->findNodeByHex(peerHex);
     if (existing && !existing->saved) {
@@ -488,12 +533,15 @@ void LvMessagesScreen::addFocusedPeerToContacts() {
         node.saved = true;
         _am->saveContacts();
         if (_ui) _ui->lvStatusBar().showToast("Added to friends", 1200);
+        return true;
     } else if (!existing) {
         _am->addManualContact(peerHex, "");
         if (_ui) _ui->lvStatusBar().showToast("Added to friends", 1200);
+        return true;
     } else if (_ui) {
         _ui->lvStatusBar().showToast("Already a friend", 1200);
     }
+    return false;
 }
 
 void LvMessagesScreen::deleteFocusedConversation() {
@@ -522,23 +570,33 @@ bool LvMessagesScreen::handleKey(const KeyEvent& event) {
 
     // Long-press menu mode
     if (_lpState == LP_MENU) {
+        if (_menuCount <= 0) {
+            hideActionMenu();
+            return true;
+        }
         if (event.up || event.down) {
             _menuIdx = (_menuIdx + (event.down ? 1 : -1) + _menuCount) % _menuCount;
-            static const char* labels[] = {"Add Friend", "Delete Chat", "Cancel"};
-            rebuildActionOverlay("CHAT ACTION", labels, 3);
+            rebuildChatActionMenu();
             return true;
         }
         if (event.enter || event.character == '\n' || event.character == '\r') {
-            if (_menuIdx == 0) {
-                addFocusedPeerToContacts();
-            } else if (_menuIdx == 1) {
-                showDeleteConfirm();
-                return true;
-            } else {
-                if (_ui) _ui->lvStatusBar().showToast("Cancelled", 800);
+            ChatMenuAction action = (_menuIdx >= 0 && _menuIdx < 3) ? _menuActions[_menuIdx] : CHAT_MENU_CANCEL;
+            switch (action) {
+                case CHAT_MENU_ADD_FRIEND: {
+                    bool changed = addFocusedPeerToContacts();
+                    hideActionMenu();
+                    if (changed) rebuildList();
+                    return true;
+                }
+                case CHAT_MENU_DELETE_CHAT:
+                    showDeleteConfirm();
+                    return true;
+                case CHAT_MENU_CANCEL:
+                default:
+                    if (_ui) _ui->lvStatusBar().showToast("Cancelled", 800);
+                    hideActionMenu();
+                    return true;
             }
-            hideActionMenu();
-            return true;
         }
         if ((event.del || event.character == 8 || event.character == 0x1B) && !event.repeat) {
             hideActionMenu();

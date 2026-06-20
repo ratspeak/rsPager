@@ -28,14 +28,23 @@ public:
     const char* title() const override { return "Messages"; }
 
 private:
+    enum ChatMenuAction {
+        CHAT_MENU_ADD_FRIEND,
+        CHAT_MENU_DELETE_CHAT,
+        CHAT_MENU_CANCEL,
+    };
+
     void rebuildList();
     int getFocusedPeerIdx() const;
     void showActionMenu(int peerIdx);
     void showDeleteConfirm();
     void hideActionMenu();
+    void rebuildChatActionMenu();
     void rebuildActionOverlay(const char* title, const char* const* labels, int count);
-    void addFocusedPeerToContacts();
+    bool addFocusedPeerToContacts();
     void deleteFocusedConversation();
+    bool isPeerSavedContact(const std::string& peerHex) const;
+    int savedContactCount() const;
 
     LXMFManager* _lxmf = nullptr;
     AnnounceManager* _am = nullptr;
@@ -45,12 +54,14 @@ private:
     int _lastUnreadTotal = 0;
     int _lastQueuedCount = 0;
     uint32_t _lastStoreRevision = 0;
+    int _lastSavedContactCount = -1;
     std::vector<std::string> _sortedPeers;
     enum LongPressState { LP_NONE, LP_MENU, LP_CONFIRM_DELETE };
     LongPressState _lpState = LP_NONE;
     int _lpPeerIdx = -1;
     int _menuIdx = 0;
     int _menuCount = 0;
+    ChatMenuAction _menuActions[3] = {CHAT_MENU_CANCEL, CHAT_MENU_CANCEL, CHAT_MENU_CANCEL};
 
     lv_obj_t* _list = nullptr;
     lv_obj_t* _lblEmpty = nullptr;
