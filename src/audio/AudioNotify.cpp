@@ -1,11 +1,53 @@
 // Audio output for T-Pager via I2S codec/amplifier path
 #include "AudioNotify.h"
 #include "config/BoardConfig.h"
+#include <Wire.h>
 #include <driver/i2s.h>
 #include <math.h>
 
 #define AUDIO_SAMPLE_RATE  16000
 #define I2S_PORT           I2S_NUM_0
+
+namespace {
+constexpr uint8_t ES8311_ADDR = 0x18;
+
+constexpr uint8_t ES8311_RESET_REG00       = 0x00;
+constexpr uint8_t ES8311_CLK_MANAGER_REG01 = 0x01;
+constexpr uint8_t ES8311_CLK_MANAGER_REG02 = 0x02;
+constexpr uint8_t ES8311_CLK_MANAGER_REG03 = 0x03;
+constexpr uint8_t ES8311_CLK_MANAGER_REG04 = 0x04;
+constexpr uint8_t ES8311_CLK_MANAGER_REG05 = 0x05;
+constexpr uint8_t ES8311_CLK_MANAGER_REG06 = 0x06;
+constexpr uint8_t ES8311_CLK_MANAGER_REG07 = 0x07;
+constexpr uint8_t ES8311_CLK_MANAGER_REG08 = 0x08;
+constexpr uint8_t ES8311_SDPIN_REG09       = 0x09;
+constexpr uint8_t ES8311_SDPOUT_REG0A      = 0x0A;
+constexpr uint8_t ES8311_SYSTEM_REG0B      = 0x0B;
+constexpr uint8_t ES8311_SYSTEM_REG0C      = 0x0C;
+constexpr uint8_t ES8311_SYSTEM_REG0D      = 0x0D;
+constexpr uint8_t ES8311_SYSTEM_REG0E      = 0x0E;
+constexpr uint8_t ES8311_SYSTEM_REG10      = 0x10;
+constexpr uint8_t ES8311_SYSTEM_REG11      = 0x11;
+constexpr uint8_t ES8311_SYSTEM_REG12      = 0x12;
+constexpr uint8_t ES8311_SYSTEM_REG13      = 0x13;
+constexpr uint8_t ES8311_SYSTEM_REG14      = 0x14;
+constexpr uint8_t ES8311_ADC_REG15         = 0x15;
+constexpr uint8_t ES8311_ADC_REG16         = 0x16;
+constexpr uint8_t ES8311_ADC_REG17         = 0x17;
+constexpr uint8_t ES8311_ADC_REG1B         = 0x1B;
+constexpr uint8_t ES8311_ADC_REG1C         = 0x1C;
+constexpr uint8_t ES8311_DAC_REG31         = 0x31;
+constexpr uint8_t ES8311_DAC_REG32         = 0x32;
+constexpr uint8_t ES8311_DAC_REG37         = 0x37;
+constexpr uint8_t ES8311_GPIO_REG44        = 0x44;
+constexpr uint8_t ES8311_GP_REG45          = 0x45;
+
+uint8_t codecVolumeReg(uint8_t volume) {
+    if (volume == 0) return 0x00;
+    volume = constrain(volume, 1, 100);
+    return 0x80 + ((uint16_t)volume * 0x40 / 100);
+}
+}
 
 void AudioNotify::begin() {
     i2s_config_t i2s_config = {};
@@ -43,17 +85,139 @@ void AudioNotify::begin() {
     i2s_zero_dma_buffer(I2S_PORT);
     _i2sReady = true;
     Serial.println("[AUDIO] I2S initialized");
+
+    _codecReady = beginCodec();
+    if (!_codecReady) {
+        Serial.println("[AUDIO] ES8311 codec init failed");
+    }
 }
 
 void AudioNotify::end() {
+    if (_codecReady) {
+        setCodecMute(true);
+        _codecReady = false;
+    }
     if (_i2sReady) {
         i2s_driver_uninstall(I2S_PORT);
         _i2sReady = false;
     }
 }
 
+void AudioNotify::setEnabled(bool enabled) {
+    _enabled = enabled;
+    if (_codecReady) setCodecMute(!enabled || _volume == 0);
+}
+
+void AudioNotify::setVolume(uint8_t vol) {
+    _volume = constrain(vol, 0, 100);
+    if (_codecReady) {
+        setCodecVolume(_volume);
+        setCodecMute(!_enabled || _volume == 0);
+    }
+}
+
+bool AudioNotify::writeCodecReg(uint8_t reg, uint8_t value) {
+    Wire.beginTransmission(ES8311_ADDR);
+    Wire.write(reg);
+    Wire.write(value);
+    return Wire.endTransmission() == 0;
+}
+
+bool AudioNotify::readCodecReg(uint8_t reg, uint8_t& value) {
+    Wire.beginTransmission(ES8311_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) return false;
+    if (Wire.requestFrom((uint8_t)ES8311_ADDR, (uint8_t)1) != 1) return false;
+    value = Wire.read();
+    return true;
+}
+
+bool AudioNotify::updateCodecReg(uint8_t reg, uint8_t clearMask, uint8_t setMask) {
+    uint8_t value = 0;
+    if (!readCodecReg(reg, value)) return false;
+    value &= ~clearMask;
+    value |= setMask;
+    return writeCodecReg(reg, value);
+}
+
+bool AudioNotify::configureCodecSampleRate() {
+    bool ok = true;
+
+    ok &= updateCodecReg(ES8311_SDPIN_REG09, 0x03, 0x0C);   // I2S, 16-bit DAC input
+    ok &= updateCodecReg(ES8311_SDPOUT_REG0A, 0x03, 0x0C);  // I2S, 16-bit ADC output
+
+    // 16 kHz with 256x MCLK = 4.096 MHz. Matches LilyGoLib's ES8311 coeff table.
+    ok &= updateCodecReg(ES8311_CLK_MANAGER_REG02, 0xF8, 0x00);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG05, 0x00);
+    ok &= updateCodecReg(ES8311_CLK_MANAGER_REG03, 0x7F, 0x10);
+    ok &= updateCodecReg(ES8311_CLK_MANAGER_REG04, 0x7F, 0x20);
+    ok &= updateCodecReg(ES8311_CLK_MANAGER_REG07, 0x3F, 0x00);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG08, 0xFF);
+    ok &= updateCodecReg(ES8311_CLK_MANAGER_REG06, 0x1F, 0x03);
+
+    return ok;
+}
+
+bool AudioNotify::beginCodec() {
+    Wire.beginTransmission(ES8311_ADDR);
+    if (Wire.endTransmission() != 0) {
+        Serial.printf("[AUDIO] ES8311 not found at 0x%02X\n", ES8311_ADDR);
+        return false;
+    }
+
+    bool ok = true;
+    ok &= writeCodecReg(ES8311_GPIO_REG44, 0x08);
+    ok &= writeCodecReg(ES8311_GPIO_REG44, 0x08);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG01, 0x30);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG02, 0x00);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG03, 0x10);
+    ok &= writeCodecReg(ES8311_ADC_REG16, 0x24);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG04, 0x10);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG05, 0x00);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG0B, 0x00);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG0C, 0x00);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG10, 0x1F);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG11, 0x7F);
+    ok &= writeCodecReg(ES8311_RESET_REG00, 0x80);
+    ok &= updateCodecReg(ES8311_RESET_REG00, 0x40, 0x00);       // slave mode
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG01, 0x3F);       // use external MCLK
+    ok &= updateCodecReg(ES8311_CLK_MANAGER_REG06, 0x20, 0x00);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG13, 0x10);
+    ok &= writeCodecReg(ES8311_ADC_REG1B, 0x0A);
+    ok &= writeCodecReg(ES8311_ADC_REG1C, 0x6A);
+    ok &= writeCodecReg(ES8311_GPIO_REG44, 0x58);
+    ok &= configureCodecSampleRate();
+
+    ok &= writeCodecReg(ES8311_RESET_REG00, 0x80);
+    ok &= writeCodecReg(ES8311_CLK_MANAGER_REG01, 0x3F);
+    ok &= updateCodecReg(ES8311_SDPIN_REG09, 0x40, 0x00);
+    ok &= updateCodecReg(ES8311_SDPOUT_REG0A, 0x40, 0x00);
+    ok &= writeCodecReg(ES8311_ADC_REG17, 0xBF);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG0E, 0x02);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG12, 0x00);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG14, 0x1A);
+    ok &= updateCodecReg(ES8311_SYSTEM_REG14, 0x40, 0x00);
+    ok &= writeCodecReg(ES8311_SYSTEM_REG0D, 0x01);
+    ok &= writeCodecReg(ES8311_ADC_REG15, 0x40);
+    ok &= writeCodecReg(ES8311_DAC_REG37, 0x08);
+    ok &= writeCodecReg(ES8311_GP_REG45, 0x00);
+    ok &= setCodecVolume(_volume);
+    ok &= setCodecMute(!_enabled || _volume == 0);
+
+    if (ok) Serial.println("[AUDIO] ES8311 codec initialized");
+    return ok;
+}
+
+bool AudioNotify::setCodecMute(bool mute) {
+    return updateCodecReg(ES8311_DAC_REG31, 0x60, mute ? 0x60 : 0x00);
+}
+
+bool AudioNotify::setCodecVolume(uint8_t volume) {
+    return writeCodecReg(ES8311_DAC_REG32, codecVolumeReg(volume));
+}
+
 void AudioNotify::writeTone(uint16_t freq, uint16_t durationMs) {
-    if (!_enabled || !_i2sReady) return;
+    if (!canPlay()) return;
 
     int numSamples = (AUDIO_SAMPLE_RATE * durationMs) / 1000;
     int16_t* buf = (int16_t*)ps_malloc(numSamples * sizeof(int16_t));
@@ -82,7 +246,7 @@ void AudioNotify::writeTone(uint16_t freq, uint16_t durationMs) {
 }
 
 void AudioNotify::writeSilence(uint16_t durationMs) {
-    if (!_i2sReady) return;
+    if (!_i2sReady || !_codecReady) return;
     int numSamples = (AUDIO_SAMPLE_RATE * durationMs) / 1000;
     size_t bufSize = numSamples * sizeof(int16_t);
     int16_t* buf = (int16_t*)ps_malloc(bufSize);
@@ -95,7 +259,7 @@ void AudioNotify::writeSilence(uint16_t durationMs) {
 }
 
 void AudioNotify::playMessage() {
-    if (!_enabled || !_i2sReady) return;
+    if (!canPlay()) return;
 
     const int sr = AUDIO_SAMPLE_RATE;
     const int toneMs = 34;
@@ -166,7 +330,7 @@ void AudioNotify::playError() {
 }
 
 void AudioNotify::playBoot() {
-    if (!_enabled || !_i2sReady) return;
+    if (!canPlay()) return;
 
     // === RATDECK BOOT SEQUENCE ===
     // Sci-fi computer startup: sweep -> digital arpeggio -> confirmation
