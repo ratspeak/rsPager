@@ -298,6 +298,8 @@ static const char* currentPosixTZ() {
 // Always emit fixarray(3) so Python LXMF doesn't default auto_compress=True for
 // our destinations. stamp_cost=nil means no inbound stamp is required. Empty
 // supported_functionality list = we do NOT support SF_COMPRESSION (bz2).
+// TODO: Add an interop-safe handheld/limited-chat capability marker here so
+// Ratspeak can hide reply/reaction controls for devices that do not support them.
 RNS::Bytes encodeAnnounceName(const String& name) {
     size_t nameLen = name.length();
     if (nameLen > 31) nameLen = 31;

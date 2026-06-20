@@ -13,6 +13,251 @@ constexpr unsigned long LXMF_DISCOVERY_RETRY_INTERVAL_MS = 10000;
 constexpr int LXMF_DISCOVERY_MAX_ATTEMPTS = 7;  // immediate attempt + six 10s retries ~= 60s
 constexpr unsigned long LXMF_LINK_ESTABLISH_TIMEOUT_MS = 30000;
 constexpr uint8_t LXMF_LINK_MAX_WAIT_ATTEMPTS = 6;
+constexpr uint8_t LXMF_FIELD_CUSTOM_TYPE = 0xFB;
+constexpr uint8_t LXMF_FIELD_CUSTOM_DATA = 0xFC;
+
+bool mpReadArrayLen(const uint8_t* data, size_t len, size_t& pos, size_t& count) {
+    if (pos >= len) return false;
+    uint8_t b = data[pos++];
+    if ((b & 0xF0) == 0x90) {
+        count = b & 0x0F;
+        return true;
+    }
+    if (b == 0xDC) {
+        if (pos + 2 > len) return false;
+        count = ((size_t)data[pos] << 8) | data[pos + 1];
+        pos += 2;
+        return true;
+    }
+    if (b == 0xDD) {
+        if (pos + 4 > len) return false;
+        count = ((size_t)data[pos] << 24) | ((size_t)data[pos + 1] << 16) |
+                ((size_t)data[pos + 2] << 8) | data[pos + 3];
+        pos += 4;
+        return true;
+    }
+    return false;
+}
+
+bool mpReadMapLen(const uint8_t* data, size_t len, size_t& pos, size_t& count) {
+    if (pos >= len) return false;
+    uint8_t b = data[pos++];
+    if ((b & 0xF0) == 0x80) {
+        count = b & 0x0F;
+        return true;
+    }
+    if (b == 0xDE) {
+        if (pos + 2 > len) return false;
+        count = ((size_t)data[pos] << 8) | data[pos + 1];
+        pos += 2;
+        return true;
+    }
+    if (b == 0xDF) {
+        if (pos + 4 > len) return false;
+        count = ((size_t)data[pos] << 24) | ((size_t)data[pos + 1] << 16) |
+                ((size_t)data[pos + 2] << 8) | data[pos + 3];
+        pos += 4;
+        return true;
+    }
+    return false;
+}
+
+bool mpReadBytes(const uint8_t* data, size_t len, size_t& pos, std::vector<uint8_t>& out) {
+    if (pos >= len) return false;
+    uint8_t b = data[pos++];
+    size_t slen = 0;
+    if ((b & 0xE0) == 0xA0) {
+        slen = b & 0x1F;
+    } else if (b == 0xD9 || b == 0xC4) {
+        if (pos >= len) return false;
+        slen = data[pos++];
+    } else if (b == 0xDA || b == 0xC5) {
+        if (pos + 2 > len) return false;
+        slen = ((size_t)data[pos] << 8) | data[pos + 1];
+        pos += 2;
+    } else if (b == 0xDB || b == 0xC6) {
+        if (pos + 4 > len) return false;
+        slen = ((size_t)data[pos] << 24) | ((size_t)data[pos + 1] << 16) |
+               ((size_t)data[pos + 2] << 8) | data[pos + 3];
+        pos += 4;
+    } else {
+        return false;
+    }
+    if (pos + slen > len) return false;
+    out.assign(data + pos, data + pos + slen);
+    pos += slen;
+    return true;
+}
+
+bool mpReadText(const uint8_t* data, size_t len, size_t& pos, std::string& out) {
+    std::vector<uint8_t> bytes;
+    if (!mpReadBytes(data, len, pos, bytes)) return false;
+    if (bytes.empty()) {
+        out.clear();
+        return true;
+    }
+    out.assign((const char*)bytes.data(), bytes.size());
+    return true;
+}
+
+bool mpReadFieldKey(const uint8_t* data, size_t len, size_t& pos, uint8_t& key) {
+    if (pos >= len) return false;
+    uint8_t b = data[pos++];
+    if (b <= 0x7F || b >= 0xE0) {
+        key = b;
+        return true;
+    }
+    if (b == 0xCC || b == 0xD0) {
+        if (pos >= len) return false;
+        key = data[pos++];
+        return true;
+    }
+    if (b == 0xCD || b == 0xD1) {
+        if (pos + 2 > len) return false;
+        uint16_t v = ((uint16_t)data[pos] << 8) | data[pos + 1];
+        pos += 2;
+        if (v > 0xFF) return false;
+        key = (uint8_t)v;
+        return true;
+    }
+    return false;
+}
+
+bool mpSkipValue(const uint8_t* data, size_t len, size_t& pos) {
+    if (pos >= len) return false;
+    uint8_t b = data[pos];
+    if ((b & 0x80) == 0x00 || b >= 0xE0 || b == 0xC0 || b == 0xC2 || b == 0xC3) {
+        pos++;
+        return true;
+    }
+    if ((b & 0xE0) == 0xA0) {
+        pos += 1 + (b & 0x1F);
+        return pos <= len;
+    }
+    if ((b & 0xF0) == 0x90) {
+        size_t count = b & 0x0F;
+        pos++;
+        for (size_t i = 0; i < count; i++) {
+            if (!mpSkipValue(data, len, pos)) return false;
+        }
+        return true;
+    }
+    if ((b & 0xF0) == 0x80) {
+        size_t count = b & 0x0F;
+        pos++;
+        for (size_t i = 0; i < count * 2; i++) {
+            if (!mpSkipValue(data, len, pos)) return false;
+        }
+        return true;
+    }
+    if (b == 0xCC || b == 0xD0) { pos += 2; return pos <= len; }
+    if (b == 0xCD || b == 0xD1) { pos += 3; return pos <= len; }
+    if (b == 0xCE || b == 0xD2 || b == 0xCA) { pos += 5; return pos <= len; }
+    if (b == 0xCF || b == 0xD3 || b == 0xCB) { pos += 9; return pos <= len; }
+    if (b == 0xD9 || b == 0xC4) {
+        if (pos + 2 > len) return false;
+        pos += 2 + data[pos + 1];
+        return pos <= len;
+    }
+    if (b == 0xDA || b == 0xC5) {
+        if (pos + 3 > len) return false;
+        size_t slen = ((size_t)data[pos + 1] << 8) | data[pos + 2];
+        pos += 3 + slen;
+        return pos <= len;
+    }
+    if (b == 0xDB || b == 0xC6) {
+        if (pos + 5 > len) return false;
+        size_t slen = ((size_t)data[pos + 1] << 24) | ((size_t)data[pos + 2] << 16) |
+                      ((size_t)data[pos + 3] << 8) | data[pos + 4];
+        pos += 5 + slen;
+        return pos <= len;
+    }
+    if (b == 0xDC || b == 0xDD) {
+        size_t count = 0;
+        if (!mpReadArrayLen(data, len, pos, count)) return false;
+        for (size_t i = 0; i < count; i++) {
+            if (!mpSkipValue(data, len, pos)) return false;
+        }
+        return true;
+    }
+    if (b == 0xDE || b == 0xDF) {
+        size_t count = 0;
+        if (!mpReadMapLen(data, len, pos, count)) return false;
+        for (size_t i = 0; i < count * 2; i++) {
+            if (!mpSkipValue(data, len, pos)) return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool ratspeakCustomDataIsReaction(const std::vector<uint8_t>& customData) {
+    size_t pos = 0;
+    size_t count = 0;
+    if (!mpReadMapLen(customData.data(), customData.size(), pos, count)) return false;
+    for (size_t i = 0; i < count; i++) {
+        std::string key;
+        size_t keyStart = pos;
+        if (!mpReadText(customData.data(), customData.size(), pos, key)) {
+            pos = keyStart;
+            if (!mpSkipValue(customData.data(), customData.size(), pos)) return false;
+            if (!mpSkipValue(customData.data(), customData.size(), pos)) return false;
+            continue;
+        }
+        if (key == "kind") {
+            std::string kind;
+            return mpReadText(customData.data(), customData.size(), pos, kind) && kind == "reaction";
+        }
+        if (!mpSkipValue(customData.data(), customData.size(), pos)) return false;
+    }
+    return false;
+}
+
+bool lxmfPayloadIsRatspeakReaction(const uint8_t* data, size_t len) {
+    if (!data || len < 97) return false;
+    const uint8_t* payload = data + 96;
+    size_t payloadLen = len - 96;
+    size_t pos = 0;
+    size_t arrLen = 0;
+    if (!mpReadArrayLen(payload, payloadLen, pos, arrLen) || arrLen < 4) return false;
+    for (int i = 0; i < 3; i++) {
+        if (!mpSkipValue(payload, payloadLen, pos)) return false;
+    }
+
+    size_t fieldCount = 0;
+    if (!mpReadMapLen(payload, payloadLen, pos, fieldCount)) return false;
+    std::string customType;
+    std::vector<uint8_t> customData;
+    for (size_t i = 0; i < fieldCount; i++) {
+        uint8_t key = 0;
+        size_t keyStart = pos;
+        if (!mpReadFieldKey(payload, payloadLen, pos, key)) {
+            pos = keyStart;
+            if (!mpSkipValue(payload, payloadLen, pos)) return false;
+            if (!mpSkipValue(payload, payloadLen, pos)) return false;
+            continue;
+        }
+
+        size_t valueStart = pos;
+        if (key == LXMF_FIELD_CUSTOM_TYPE) {
+            if (!mpReadText(payload, payloadLen, pos, customType)) {
+                pos = valueStart;
+                if (!mpSkipValue(payload, payloadLen, pos)) return false;
+            }
+        } else if (key == LXMF_FIELD_CUSTOM_DATA) {
+            if (!mpReadBytes(payload, payloadLen, pos, customData)) {
+                pos = valueStart;
+                if (!mpSkipValue(payload, payloadLen, pos)) return false;
+            }
+        } else if (!mpSkipValue(payload, payloadLen, pos)) {
+            return false;
+        }
+    }
+
+    if (customType == "ratspeak.reaction") return true;
+    if (customType != "ratspeak.chat.v1" && customType != "ratspeak.chat.v2") return false;
+    return ratspeakCustomDataIsReaction(customData);
+}
 }
 
 bool LXMFManager::begin(ReticulumManager* rns, MessageStore* store) {
@@ -456,6 +701,11 @@ void LXMFManager::processIncoming(const uint8_t* data, size_t len, const RNS::By
     if (_rns && msg.destHash != _rns->destination().hash()) {
         Serial.printf("[LXMF] Dropping message for wrong destination %s\n",
                       msg.destHash.toHex().substr(0, 8).c_str());
+        return;
+    }
+    if (lxmfPayloadIsRatspeakReaction(data, len)) {
+        Serial.printf("[LXMF] Dropping Ratspeak reaction from %s\n",
+                      msg.sourceHash.toHex().substr(0, 8).c_str());
         return;
     }
     // Use local receive time for incoming messages so all timestamps in
