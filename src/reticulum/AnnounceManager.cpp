@@ -4,6 +4,7 @@
 #include "storage/SDStore.h"
 #include "storage/FlashStore.h"
 #include "transport/LoRaInterface.h"
+#include "util/PerfTrace.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 
@@ -429,17 +430,39 @@ std::string AnnounceManager::lookupName(const std::string& hexHash) const {
 }
 
 void AnnounceManager::saveNameCache() {
+    unsigned long startMs = PerfTrace::nowMs();
+    unsigned long phaseMs = PerfTrace::nowMs();
     JsonDocument doc;
     for (auto& kv : _nameCache) {
         doc[kv.first] = kv.second;
     }
     String json;
     serializeJson(doc, json);
+    unsigned long jsonMs = PerfTrace::elapsedMs(phaseMs);
+    size_t jsonBytes = json.length();
+    unsigned long sdMs = 0;
+    unsigned long flashMs = 0;
+    bool sdOk = false;
+    bool flashOk = false;
     if (_sd && _sd->isReady()) {
-        _sd->writeString("/ratpager/config/names.json", json);
+        phaseMs = PerfTrace::nowMs();
+        sdOk = _sd->writeString("/ratpager/config/names.json", json);
+        sdMs = PerfTrace::elapsedMs(phaseMs);
     }
     if (_flash) {
-        _flash->writeString("/config/names.json", json);
+        phaseMs = PerfTrace::nowMs();
+        flashOk = _flash->writeString("/config/names.json", json);
+        flashMs = PerfTrace::elapsedMs(phaseMs);
+    }
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if ((!flashOk && _flash) ||
+        (!sdOk && _sd && _sd->isReady()) ||
+        PerfTrace::shouldLog(elapsed, RSPAGER_PERF_PERSIST_TRACE_MS) ||
+        PerfTrace::shouldLog(sdMs, RSPAGER_PERF_WRITE_TRACE_MS) ||
+        PerfTrace::shouldLog(flashMs, RSPAGER_PERF_WRITE_TRACE_MS)) {
+        RSPAGER_PERF_PRINTF("[PERF] ANNOUNCE saveNameCache: entries=%d bytes=%u total=%lums json=%lums sd=%d sd_ms=%lums flash=%d flash_ms=%lums\n",
+                            (int)_nameCache.size(), (unsigned)jsonBytes,
+                            elapsed, jsonMs, sdOk ? 1 : 0, sdMs, flashOk ? 1 : 0, flashMs);
     }
     Serial.printf("[ANNOUNCE] Name cache saved (%d entries)\n", (int)_nameCache.size());
 }

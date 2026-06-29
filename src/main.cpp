@@ -1596,14 +1596,14 @@ void setup() {
     lvHomeScreen.setTCPToggleCallback([]() {
         auto& s = userConfig.settings();
         bool enabled = false;
-        bool hasSavedRelay = false;
+        bool hasSavedTcpServer = false;
         for (const auto& ep : s.tcpConnections) {
-            if (!ep.host.isEmpty()) hasSavedRelay = true;
+            if (!ep.host.isEmpty()) hasSavedTcpServer = true;
             if (!ep.host.isEmpty() && ep.autoConnect) { enabled = true; break; }
         }
         if (enabled) {
             for (auto& ep : s.tcpConnections) ep.autoConnect = false;
-        } else if (hasSavedRelay) {
+        } else if (hasSavedTcpServer) {
             for (auto& ep : s.tcpConnections) {
                 if (!ep.host.isEmpty()) ep.autoConnect = true;
             }
@@ -1617,9 +1617,9 @@ void setup() {
         }
         bool ok = userConfig.save(sdStore, flash);
         ui.lvStatusBar().showToast(
-            ok ? "TCP relay saved; reboot to apply" : "Save failed",
+            ok ? "TCP server saved; reboot to apply" : "Save failed",
             ok ? 3000 : 2000);
-        Serial.printf("[TCP] Saved relay %s (save %s, reboot required)\n",
+        Serial.printf("[TCP] Saved server %s (save %s, reboot required)\n",
                       enabled ? "OFF" : "ON",
                       ok ? "OK" : "FAILED");
     });

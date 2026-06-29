@@ -4,6 +4,7 @@
 #include "ui/LvTabBar.h"
 #include "reticulum/LXMFManager.h"
 #include "reticulum/AnnounceManager.h"
+#include "util/PerfTrace.h"
 #include <Arduino.h>
 #include <time.h>
 #include <cmath>
@@ -106,6 +107,23 @@ void LvMessageView::updateHeader() {
     if (_lblHeaderState) {
         lv_label_set_text(_lblHeaderState, state);
         lv_obj_set_style_text_color(_lblHeaderState, lv_color_hex(stateColor), 0);
+    }
+}
+
+void LvMessageView::markVisibleConversationRead() {
+    if (!_markReadPending || !_lxmf) return;
+
+    unsigned long startMs = PerfTrace::nowMs();
+    _lxmf->markRead(_peerHex);
+    _markReadPending = false;
+    if (_ui) {
+        _ui->lvTabBar().setUnreadCount(LvTabBar::TAB_MSGS, _lxmf->unreadCount());
+    }
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_MSG_TRACE_MS)) {
+        char peerShort[9];
+        PerfTrace::shortHex(_peerHex, peerShort, sizeof(peerShort));
+        RSPAGER_PERF_PRINTF("[PERF] Chat markRead: peer=%s total=%lums\n", peerShort, elapsed);
     }
 }
 
@@ -298,10 +316,13 @@ void LvMessageView::destroyUI() {
 }
 
 void LvMessageView::onEnter() {
+    unsigned long startMs = PerfTrace::nowMs();
+    unsigned long phaseMs = 0;
+    unsigned long markReadMs = 0;
+    unsigned long setupMs = 0;
+    unsigned long rebuildMs = 0;
     if (_lxmf) {
-        _lxmf->markRead(_peerHex);
-        // Update unread badge on Messages tab
-        if (_ui) _ui->lvTabBar().setUnreadCount(LvTabBar::TAB_MSGS, _lxmf->unreadCount());
+        _markReadPending = true;
         // Register status callback - partial update without full rebuild
         std::string peer = _peerHex;
         _lxmf->setStatusCallback([this, peer](const std::string& peerHex, double ts, uint32_t savedCounter, LXMFStatus newStatus) {
@@ -318,7 +339,9 @@ void LvMessageView::onEnter() {
             }
         });
     }
+    phaseMs = PerfTrace::nowMs();
     _lastMsgCount = -1;
+    _knownTotalCount = -1;
     _lastRefreshMs = 0;
     _inputText.clear();
     hideSendModeMenu();
@@ -329,11 +352,26 @@ void LvMessageView::onEnter() {
     updateHeader();
     updateComposerState();
     _cachedMsgs.clear();  // Force fresh load
+    setupMs = PerfTrace::elapsedMs(phaseMs);
+    phaseMs = PerfTrace::nowMs();
     rebuildMessages();
+    rebuildMs = PerfTrace::elapsedMs(phaseMs);
+
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_UI_TRACE_MS) ||
+        PerfTrace::shouldLog(markReadMs, RSPAGER_PERF_MSG_TRACE_MS) ||
+        PerfTrace::shouldLog(rebuildMs, RSPAGER_PERF_UI_TRACE_MS)) {
+        char peerShort[9];
+        PerfTrace::shortHex(_peerHex, peerShort, sizeof(peerShort));
+        RSPAGER_PERF_PRINTF("[PERF] Chat onEnter: peer=%s msgs=%d total=%lums mark_read=%lums setup=%lums rebuild=%lums\n",
+                            peerShort, (int)_cachedMsgs.size(), elapsed,
+                            markReadMs, setupMs, rebuildMs);
+    }
 }
 
 void LvMessageView::onExit() {
     if (_lxmf) _lxmf->setStatusCallback(nullptr);
+    _markReadPending = false;
     hideSendModeMenu();
     _inputText.clear();
     _cachedMsgs.clear();
@@ -345,17 +383,23 @@ void LvMessageView::onExit() {
 void LvMessageView::refreshUI() {
     if (!_lxmf) return;
     unsigned long now = millis();
+    markVisibleConversationRead();
     if (now - _lastRefreshMs < REFRESH_INTERVAL_MS) return;
     _lastRefreshMs = now;
     updateHeader();
 
     // Only reload from disk when message count changes (new messages arrive)
     auto* summary = _lxmf->getConversationSummary(_peerHex);
-    if (summary && summary->totalCount == (int)_cachedMsgs.size()) return;
+    int totalCount = summary ? summary->totalCount : -1;
+    if (summary && totalCount == _knownTotalCount) return;
 
-    auto newMsgs = _lxmf->getMessages(_peerHex);
-    if (newMsgs.size() != _cachedMsgs.size()) {
-        if (newMsgs.size() > _cachedMsgs.size()) {
+    auto newMsgs = _lxmf->getRecentMessages(_peerHex, CHAT_VIEW_MAX_MESSAGES);
+    int newKnownTotal = summary ? totalCount : (int)newMsgs.size();
+    if (newKnownTotal != _knownTotalCount || newMsgs.size() != _cachedMsgs.size()) {
+        bool canAppend = !_cachedMsgs.empty() &&
+            _cachedMsgs.size() < CHAT_VIEW_MAX_MESSAGES &&
+            newMsgs.size() > _cachedMsgs.size();
+        if (canAppend) {
             // Incremental append - only create widgets for new messages
             size_t oldCount = _cachedMsgs.size();
             _cachedMsgs = std::move(newMsgs);
@@ -370,14 +414,15 @@ void LvMessageView::refreshUI() {
             }
             lv_obj_scroll_to_y(_msgScroll, LV_COORD_MAX, LV_ANIM_OFF);
         } else {
-            // Count decreased (deletion?) - full rebuild
+            // Tail window shifted, count decreased, or cache was empty - full visible-window rebuild.
             _cachedMsgs = std::move(newMsgs);
             _lastMsgCount = (int)_cachedMsgs.size();
             rebuildMessages();
         }
+        _knownTotalCount = newKnownTotal;
         // Mark as read since user is actively viewing this conversation
-        _lxmf->markRead(_peerHex);
-        if (_ui) _ui->lvTabBar().setUnreadCount(LvTabBar::TAB_MSGS, _lxmf->unreadCount());
+        _markReadPending = true;
+        markVisibleConversationRead();
     }
 }
 
@@ -485,19 +530,34 @@ void LvMessageView::appendMessage(const LXMFMessage& msg) {
 
 void LvMessageView::rebuildMessages() {
     if (!_lxmf || !_msgScroll) return;
-    unsigned long startMs = millis();
+    unsigned long startMs = PerfTrace::nowMs();
+    unsigned long phaseMs = 0;
+    unsigned long loadMs = 0;
+    unsigned long cleanMs = 0;
+    unsigned long renderMs = 0;
+    bool loadedFromStore = false;
 
     // Only load from disk if _cachedMsgs is empty (first call or after send)
     if (_cachedMsgs.empty()) {
-        _cachedMsgs = _lxmf->getMessages(_peerHex);
+        loadedFromStore = true;
+        phaseMs = PerfTrace::nowMs();
+        _cachedMsgs = _lxmf->getRecentMessages(_peerHex, CHAT_VIEW_MAX_MESSAGES);
+        loadMs = PerfTrace::elapsedMs(phaseMs);
+    }
+    if (_lxmf) {
+        auto* summary = _lxmf->getConversationSummary(_peerHex);
+        _knownTotalCount = summary ? summary->totalCount : (int)_cachedMsgs.size();
     }
     _lastMsgCount = (int)_cachedMsgs.size();
     _lastRefreshMs = millis();
+    phaseMs = PerfTrace::nowMs();
     lv_obj_clean(_msgScroll);
+    cleanMs = PerfTrace::elapsedMs(phaseMs);
     _statusLabels.clear();
     _textLabels.clear();
     _bubbleBoxes.clear();
 
+    phaseMs = PerfTrace::nowMs();
     if (_cachedMsgs.empty()) {
         lv_obj_set_layout(_msgScroll, 0);
 
@@ -529,6 +589,16 @@ void LvMessageView::rebuildMessages() {
         lv_obj_set_style_text_color(sub, lv_color_hex(Theme::TEXT_SECONDARY), 0);
         lv_label_set_text(sub, "Thread is quiet");
         lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, 54);
+        renderMs = PerfTrace::elapsedMs(phaseMs);
+        unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+        if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_UI_TRACE_MS) ||
+            PerfTrace::shouldLog(loadMs, RSPAGER_PERF_MSG_TRACE_MS)) {
+            char peerShort[9];
+            PerfTrace::shortHex(_peerHex, peerShort, sizeof(peerShort));
+            RSPAGER_PERF_PRINTF("[PERF] Chat rebuild: peer=%s msgs=0 loaded=%d total=%lums load=%lums clean=%lums render=%lums\n",
+                                peerShort, loadedFromStore ? 1 : 0,
+                                elapsed, loadMs, cleanMs, renderMs);
+        }
         return;
     }
 
@@ -542,10 +612,15 @@ void LvMessageView::rebuildMessages() {
     // Auto-scroll to bottom
     lv_obj_scroll_to_y(_msgScroll, LV_COORD_MAX, LV_ANIM_OFF);
 
-    unsigned long elapsed = millis() - startMs;
-    if (elapsed > 40) {
-        Serial.printf("[PERF] Chat rebuild: %d msgs in %lums\n",
-                      (int)_cachedMsgs.size(), (unsigned long)elapsed);
+    renderMs = PerfTrace::elapsedMs(phaseMs);
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_UI_TRACE_MS) ||
+        PerfTrace::shouldLog(loadMs, RSPAGER_PERF_MSG_TRACE_MS)) {
+        char peerShort[9];
+        PerfTrace::shortHex(_peerHex, peerShort, sizeof(peerShort));
+        RSPAGER_PERF_PRINTF("[PERF] Chat rebuild: peer=%s msgs=%d loaded=%d total=%lums load=%lums clean=%lums render=%lums\n",
+                            peerShort, (int)_cachedMsgs.size(), loadedFromStore ? 1 : 0,
+                            elapsed, loadMs, cleanMs, renderMs);
     }
 }
 
@@ -609,26 +684,47 @@ void LvMessageView::applyStatusGlyph(lv_obj_t* lbl, LXMFStatus status) {
 
 void LvMessageView::sendCurrentMessage(bool viaLink) {
     if (!_lxmf || _peerHex.empty() || _inputText.empty()) return;
+    unsigned long startMs = PerfTrace::nowMs();
+    size_t inputChars = _inputText.size();
+    char peerShort[9];
+    PerfTrace::shortHex(_peerHex, peerShort, sizeof(peerShort));
     if (_inputText.size() > MAX_COMPOSER_CHARS) {
         if (_ui) _ui->lvStatusBar().showToast("Message too long", 1500);
+        RSPAGER_PERF_PRINTF("[PERF] Chat send: peer=%s via=%d chars=%u result=too_long total=%lums\n",
+                            peerShort, viaLink ? 1 : 0, (unsigned)inputChars,
+                            PerfTrace::elapsedMs(startMs));
         return;
     }
 
     RNS::Bytes destHash;
     destHash.assignHex(_peerHex.c_str());
+    unsigned long phaseMs = PerfTrace::nowMs();
     bool queued = viaLink
         ? _lxmf->sendMessageViaLink(destHash, _inputText.c_str())
         : _lxmf->sendMessage(destHash, _inputText.c_str());
+    unsigned long queueMs = PerfTrace::elapsedMs(phaseMs);
     if (!queued) {
         if (_ui) _ui->lvStatusBar().showToast("Message queue full", 1500);
+        RSPAGER_PERF_PRINTF("[PERF] Chat send: peer=%s via=%d chars=%u result=queue_full total=%lums queue=%lums\n",
+                            peerShort, viaLink ? 1 : 0, (unsigned)inputChars,
+                            PerfTrace::elapsedMs(startMs), queueMs);
         return;
     }
     if (viaLink && _ui) _ui->lvStatusBar().showToast("Link send queued", 1200);
 
+    phaseMs = PerfTrace::nowMs();
     _inputText.clear();
     updateComposerState();
+    unsigned long composerMs = PerfTrace::elapsedMs(phaseMs);
+    phaseMs = PerfTrace::nowMs();
     _cachedMsgs.clear();  // Force fresh load in rebuildMessages
+    _knownTotalCount = -1;
     rebuildMessages();
+    unsigned long renderMs = PerfTrace::elapsedMs(phaseMs);
+    RSPAGER_PERF_PRINTF("[PERF] Chat send: peer=%s via=%d chars=%u result=queued total=%lums queue=%lums composer=%lums render=%lums msgs=%d\n",
+                        peerShort, viaLink ? 1 : 0, (unsigned)inputChars,
+                        PerfTrace::elapsedMs(startMs), queueMs, composerMs, renderMs,
+                        (int)_cachedMsgs.size());
 }
 
 bool LvMessageView::handleKey(const KeyEvent& event) {

@@ -1,5 +1,6 @@
 #include "MessageStore.h"
 #include "config/Config.h"
+#include "util/PerfTrace.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -27,36 +28,42 @@ bool MessageStore::begin(FlashStore* flash, SDStore* sd, bool externalStorageEna
     _flash = flash;
     _sd = sd;
     _externalStorageEnabled = externalStorageEnabled;
-    unsigned long beginMs = millis();
+    unsigned long beginMs = PerfTrace::nowMs();
+    unsigned long phaseMs = PerfTrace::nowMs();
     _flash->ensureDir(PATH_MESSAGES);
+    unsigned long flashDirMs = PerfTrace::elapsedMs(phaseMs);
 
-    unsigned long phaseMs = millis();
+    phaseMs = PerfTrace::nowMs();
     if (_externalStorageEnabled && _sd && _sd->isReady()) {
         _sd->ensureDir(SD_PATH_ROOT);
         _sd->ensureDir(SD_PATH_MESSAGES);
         migrateFlashToSD();
     }
-    unsigned long migrateMs = millis() - phaseMs;
+    unsigned long migrateMs = PerfTrace::elapsedMs(phaseMs);
 
-    phaseMs = millis();
+    phaseMs = PerfTrace::nowMs();
     migrateTruncatedDirs();
-    unsigned long truncMs = millis() - phaseMs;
+    unsigned long truncMs = PerfTrace::elapsedMs(phaseMs);
 
-    phaseMs = millis();
+    phaseMs = PerfTrace::nowMs();
     initReceiveCounter();
-    unsigned long counterMs = millis() - phaseMs;
+    unsigned long counterMs = PerfTrace::elapsedMs(phaseMs);
 
-    phaseMs = millis();
+    phaseMs = PerfTrace::nowMs();
     refreshConversations();
-    unsigned long refreshMs = millis() - phaseMs;
+    unsigned long refreshMs = PerfTrace::elapsedMs(phaseMs);
 
-    phaseMs = millis();
+    phaseMs = PerfTrace::nowMs();
     buildSummaries();
-    unsigned long summaryMs = millis() - phaseMs;
-    unsigned long totalMs = millis() - beginMs;
-    if (totalMs > 100 || summaryMs > 50) {
-        Serial.printf("[PERF] MSG begin: total=%lums migrate=%lums trunc=%lums counter=%lums refresh=%lums summaries=%lums\n",
-                      totalMs, migrateMs, truncMs, counterMs, refreshMs, summaryMs);
+    unsigned long summaryMs = PerfTrace::elapsedMs(phaseMs);
+    unsigned long totalMs = PerfTrace::elapsedMs(beginMs);
+    if (PerfTrace::shouldLog(totalMs, RSPAGER_PERF_MSG_TRACE_MS)) {
+        RSPAGER_PERF_PRINTF("[PERF] MSG begin: convs=%d ext=%d sd=%d flash=%d total=%lums flash_dir=%lums migrate=%lums trunc=%lums counter=%lums refresh=%lums summaries=%lums\n",
+                            (int)_conversations.size(),
+                            _externalStorageEnabled ? 1 : 0,
+                            (_sd && _sd->isReady()) ? 1 : 0,
+                            (_flash && _flash->isReady()) ? 1 : 0,
+                            totalMs, flashDirMs, migrateMs, truncMs, counterMs, refreshMs, summaryMs);
     }
     Serial.printf("[MSGSTORE] %d conversations found, receive counter=%lu\n",
                   (int)_conversations.size(), (unsigned long)_nextReceiveCounter);
@@ -281,11 +288,12 @@ void MessageStore::refreshConversations() {
 
 bool MessageStore::saveMessage(LXMFMessage& msg) {
     if (!_flash) return false;
-    unsigned long startMs = millis();
+    unsigned long startMs = PerfTrace::nowMs();
 
     std::string peerHex = msg.incoming ?
         msg.sourceHash.toHex() : msg.destHash.toHex();
 
+    unsigned long phaseMs = PerfTrace::nowMs();
     JsonDocument doc;
     doc["src"] = msg.sourceHash.toHex();
     doc["dst"] = msg.destHash.toHex();
@@ -301,6 +309,8 @@ bool MessageStore::saveMessage(LXMFMessage& msg) {
 
     String json;
     serializeJson(doc, json);
+    unsigned long jsonMs = PerfTrace::elapsedMs(phaseMs);
+    size_t jsonBytes = json.length();
 
     // Counter-based filename: unique, monotonic, sorts correctly
     uint32_t counter = _nextReceiveCounter++;
@@ -310,27 +320,36 @@ bool MessageStore::saveMessage(LXMFMessage& msg) {
              (unsigned long)counter, msg.incoming ? 'i' : 'o');
 
     // Persist counter to NVS
+    phaseMs = PerfTrace::nowMs();
     {
         Preferences p;
         p.begin("ratpager_msg", false);
         p.putUInt("msgctr", _nextReceiveCounter);
         p.end();
     }
+    unsigned long nvsMs = PerfTrace::elapsedMs(phaseMs);
 
     bool sdOk = false;
     bool flashOk = false;
+    unsigned long sdMs = 0;
+    unsigned long flashMs = 0;
+    unsigned long limitMs = 0;
 
     if (_externalStorageEnabled && _sd && _sd->isReady()) {
+        phaseMs = PerfTrace::nowMs();
         String sdDir = sdConversationDir(peerHex);
         _sd->ensureDir(sdDir.c_str());
         String sdPath = sdDir + "/" + filename;
         sdOk = _sd->writeString(sdPath.c_str(), json);
+        sdMs = PerfTrace::elapsedMs(phaseMs);
     }
 
+    phaseMs = PerfTrace::nowMs();
     String flashDir = conversationDir(peerHex);
     _flash->ensureDir(flashDir.c_str());
     String flashPath = flashDir + "/" + filename;
     flashOk = _flash->writeString(flashPath.c_str(), json);
+    flashMs = PerfTrace::elapsedMs(phaseMs);
     bool saved = sdOk || flashOk;
 
     bool found = false;
@@ -339,10 +358,13 @@ bool MessageStore::saveMessage(LXMFMessage& msg) {
     }
     if (!found) _conversations.push_back(peerHex);
 
+    phaseMs = PerfTrace::nowMs();
     if (sdOk) enforceSDLimit(peerHex);
     if (flashOk) enforceFlashLimit(peerHex);
+    limitMs = PerfTrace::elapsedMs(phaseMs);
 
     // Update summary cache
+    phaseMs = PerfTrace::nowMs();
     {
         auto& s = _summaries[peerHex];
         s.lastTimestamp = msg.timestamp;
@@ -368,20 +390,37 @@ bool MessageStore::saveMessage(LXMFMessage& msg) {
             rebuildSummary(peerHex);
         }
     }
+    unsigned long summaryMs = PerfTrace::elapsedMs(phaseMs);
 
     if (saved) bumpRevision();
-    unsigned long elapsed = millis() - startMs;
-    if (elapsed > 30) {
-        Serial.printf("[PERF] MSG save: %s dir=%c sd=%s flash=%s in %lums\n",
-                      peerHex.substr(0, 8).c_str(), msg.incoming ? 'i' : 'o',
-                      sdOk ? "ok" : "no", flashOk ? "ok" : "no",
-                      (unsigned long)elapsed);
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (!saved ||
+        PerfTrace::shouldLog(elapsed, RSPAGER_PERF_MSG_TRACE_MS) ||
+        PerfTrace::shouldLog(nvsMs, RSPAGER_PERF_WRITE_TRACE_MS) ||
+        PerfTrace::shouldLog(sdMs, RSPAGER_PERF_WRITE_TRACE_MS) ||
+        PerfTrace::shouldLog(flashMs, RSPAGER_PERF_WRITE_TRACE_MS)) {
+        char peerShort[9];
+        PerfTrace::shortHex(peerHex, peerShort, sizeof(peerShort));
+        RSPAGER_PERF_PRINTF("[PERF] MSG save: peer=%s dir=%c counter=%lu bytes=%u saved=%d sd=%d flash=%d total=%lums json=%lums nvs=%lums sd_ms=%lums flash_ms=%lums limits=%lums summary=%lums\n",
+                            peerShort, msg.incoming ? 'i' : 'o',
+                            (unsigned long)counter, (unsigned)jsonBytes,
+                            saved ? 1 : 0, sdOk ? 1 : 0, flashOk ? 1 : 0,
+                            elapsed, jsonMs, nvsMs, sdMs, flashMs, limitMs, summaryMs);
     }
     return saved;
 }
 
 std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerHex) const {
+    return loadConversationTail(peerHex, 0);
+}
+
+std::vector<LXMFMessage> MessageStore::loadConversationTail(const std::string& peerHex, size_t maxMessages) const {
+    unsigned long startMs = PerfTrace::nowMs();
     std::vector<LXMFMessage> messages;
+    int fileCount = 0;
+    int parsedCount = 0;
+    size_t jsonBytes = 0;
+    const char* backend = "none";
 
     auto loadFromDir = [&](File& d, auto readFileFn) {
         // Collect filenames first, then sort alphabetically (counter prefix = insertion order)
@@ -394,10 +433,18 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
             entry = d.openNextFile();
         }
         std::sort(filenames.begin(), filenames.end());
+        fileCount += (int)filenames.size();
 
-        for (const auto& fname : filenames) {
+        size_t startIndex = 0;
+        if (maxMessages > 0 && filenames.size() > maxMessages) {
+            startIndex = filenames.size() - maxMessages;
+        }
+
+        for (size_t i = startIndex; i < filenames.size(); i++) {
+            const auto& fname = filenames[i];
             String json = readFileFn(fname);
             if (json.length() == 0) continue;
+            jsonBytes += json.length();
             JsonDocument doc;
             if (!deserializeJson(doc, json)) {
                 LXMFMessage msg;
@@ -424,6 +471,7 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
                     msg.messageId.assignHex(msgIdHex.c_str());
                 }
                 messages.push_back(msg);
+                parsedCount++;
             }
         }
     };
@@ -433,6 +481,7 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
         String sdDir = sdConversationDir(peerHex);
         File d = _sd->openDir(sdDir.c_str());
         if (d && d.isDirectory()) {
+            backend = "sd";
             loadFromDir(d, [&](const String& fname) {
                 String path = sdDir + "/" + fname;
                 return _sd->readString(path.c_str());
@@ -445,6 +494,7 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
         String dir = conversationDir(peerHex);
         File d = LittleFS.open(dir);
         if (d && d.isDirectory()) {
+            backend = "flash";
             loadFromDir(d, [&](const String& fname) {
                 String path = dir + "/" + fname;
                 File f = LittleFS.open(path);
@@ -457,6 +507,14 @@ std::vector<LXMFMessage> MessageStore::loadConversation(const std::string& peerH
         }
     }
 
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_MSG_TRACE_MS) || fileCount > 64) {
+        char peerShort[9];
+        PerfTrace::shortHex(peerHex, peerShort, sizeof(peerShort));
+        RSPAGER_PERF_PRINTF("[PERF] MSG loadConversation: peer=%s backend=%s files=%d parsed=%d cap=%u bytes=%u total=%lums\n",
+                            peerShort, backend, fileCount, parsedCount,
+                            (unsigned)maxMessages, (unsigned)jsonBytes, elapsed);
+    }
     return messages;
 }
 
@@ -566,14 +624,27 @@ bool MessageStore::deleteConversation(const std::string& peerHex) {
 }
 
 void MessageStore::markConversationRead(const std::string& peerHex) {
-    unsigned long startMs = millis();
+    unsigned long startMs = PerfTrace::nowMs();
     int scannedFiles = 0;
     int rewrittenFiles = 0;
-    auto markInDir = [&](auto openFn, auto writeFn, const String& dir) {
+    int sdScanned = 0;
+    int sdRewritten = 0;
+    int flashScanned = 0;
+    int flashRewritten = 0;
+    size_t jsonBytes = 0;
+    unsigned long sdMs = 0;
+    unsigned long flashMs = 0;
+    auto markInDir = [&](auto openFn, auto writeFn, const String& dir,
+                         int& backendScanned, int& backendRewritten,
+                         unsigned long& backendMs) {
+        unsigned long phaseMs = PerfTrace::nowMs();
         // Collect only incoming (_i.json) filenames
         std::vector<String> incomingFiles;
         File d = openFn(dir.c_str());
-        if (!d || !d.isDirectory()) return;
+        if (!d || !d.isDirectory()) {
+            backendMs = PerfTrace::elapsedMs(phaseMs);
+            return;
+        }
         File entry = d.openNextFile();
         while (entry) {
             if (!entry.isDirectory() && isJsonFile(entry.name())) {
@@ -602,6 +673,8 @@ void MessageStore::markConversationRead(const std::string& peerHex) {
             }
             if (json.length() == 0) continue;
             scannedFiles++;
+            backendScanned++;
+            jsonBytes += json.length();
 
             JsonDocument doc;
             if (deserializeJson(doc, json)) continue;
@@ -612,21 +685,23 @@ void MessageStore::markConversationRead(const std::string& peerHex) {
             serializeJson(doc, updated);
             writeFn(path.c_str(), updated);
             rewrittenFiles++;
+            backendRewritten++;
         }
+        backendMs = PerfTrace::elapsedMs(phaseMs);
     };
 
     if (_externalStorageEnabled && _sd && _sd->isReady()) {
         String sdDir = sdConversationDir(peerHex);
         markInDir([&](const char* p) { return _sd->openDir(p); },
                   [&](const char* p, const String& d) { _sd->writeString(p, d); return true; },
-                  sdDir);
+                  sdDir, sdScanned, sdRewritten, sdMs);
     }
 
     if (_flash) {
         String dir = conversationDir(peerHex);
         markInDir([](const char* p) { return LittleFS.open(p); },
                   [&](const char* p, const String& d) { _flash->writeString(p, d); return true; },
-                  dir);
+                  dir, flashScanned, flashRewritten, flashMs);
     }
 
     bool changed = false;
@@ -639,11 +714,14 @@ void MessageStore::markConversationRead(const std::string& peerHex) {
         changed = true;
     }
     if (changed) bumpRevision();
-    unsigned long elapsed = millis() - startMs;
-    if (elapsed > 25) {
-        Serial.printf("[PERF] MSG markRead: %s scanned=%d wrote=%d in %lums\n",
-                      peerHex.substr(0, 8).c_str(), scannedFiles, rewrittenFiles,
-                      (unsigned long)elapsed);
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_MSG_TRACE_MS) || rewrittenFiles > 0) {
+        char peerShort[9];
+        PerfTrace::shortHex(peerHex, peerShort, sizeof(peerShort));
+        RSPAGER_PERF_PRINTF("[PERF] MSG markRead: peer=%s scanned=%d wrote=%d bytes=%u total=%lums sd_scan=%d sd_write=%d sd_ms=%lums flash_scan=%d flash_write=%d flash_ms=%lums changed=%d\n",
+                            peerShort, scannedFiles, rewrittenFiles, (unsigned)jsonBytes,
+                            elapsed, sdScanned, sdRewritten, sdMs,
+                            flashScanned, flashRewritten, flashMs, changed ? 1 : 0);
     }
 }
 
@@ -773,7 +851,10 @@ bool MessageStore::updateMessageStatusByCounter(const std::string& peerHex, uint
     return updated;
 }
 
-ConversationSummary MessageStore::buildSummaryForPeer(const std::string& peerHex) const {
+ConversationSummary MessageStore::buildSummaryForPeer(
+    const std::string& peerHex,
+    std::vector<LXMFMessage>* pendingOut,
+    std::vector<std::pair<uint32_t, std::string>>* recentIds) const {
     unsigned long startMs = millis();
     ConversationSummary summary;
 
@@ -810,6 +891,7 @@ ConversationSummary MessageStore::buildSummaryForPeer(const std::string& peerHex
 
     std::sort(files.begin(), files.end());
     String basePath = loadedFromSD ? sdConversationDir(peerHex) : conversationDir(peerHex);
+    const bool collectStartup = pendingOut || recentIds;
 
     auto readJsonFile = [&](const String& path) -> String {
         if (loadedFromSD && _sd && _sd->isReady()) return _sd->readString(path.c_str());
@@ -817,20 +899,7 @@ ConversationSummary MessageStore::buildSummaryForPeer(const std::string& peerHex
         return String("");
     };
 
-    String lastPath = basePath + "/" + files.back();
-    String json = readJsonFile(lastPath);
-    if (json.length() > 0) {
-        JsonDocument doc;
-        if (!deserializeJson(doc, json)) {
-            summary.lastTimestamp = doc["ts"] | 0.0;
-            std::string content = doc["content"] | "";
-            summary.lastIncoming = doc["incoming"] | false;
-            std::string prefix = summary.lastIncoming ? "Them: " : "You: ";
-            if (content.size() > 15) content = content.substr(0, 15) + "...";
-            summary.lastPreview = prefix + content;
-        }
-    }
-
+    bool lastDone = false;
     bool unreadDone = false;
     for (int i = (int)files.size() - 1; i >= 0; i--) {
         const String& fname = files[i];
@@ -838,13 +907,32 @@ ConversationSummary MessageStore::buildSummaryForPeer(const std::string& peerHex
         const bool outgoingFile = hasDirectionSuffix(fname, 'o');
         const bool needIncoming = incomingFile && !unreadDone;
         const bool needOutgoing = outgoingFile;
-        if (!needIncoming && !needOutgoing) continue;
+        const bool needLast = !lastDone;
+        if (!collectStartup && !needLast && !needIncoming && !needOutgoing) continue;
 
         String fjson = readJsonFile(basePath + "/" + fname);
         if (fjson.length() == 0) continue;
 
         JsonDocument fdoc;
         if (deserializeJson(fdoc, fjson)) continue;
+        uint32_t counter = counterFromFilename(fname);
+
+        if (needLast) {
+            summary.lastTimestamp = fdoc["ts"] | 0.0;
+            std::string content = fdoc["content"] | "";
+            summary.lastIncoming = fdoc["incoming"] | false;
+            std::string prefix = summary.lastIncoming ? "Them: " : "You: ";
+            if (content.size() > 15) content = content.substr(0, 15) + "...";
+            summary.lastPreview = prefix + content;
+            lastDone = true;
+        }
+
+        if (recentIds) {
+            std::string msgIdHex = fdoc["msgid"] | "";
+            if (!msgIdHex.empty()) {
+                recentIds->push_back({counter, msgIdHex});
+            }
+        }
 
         if (needIncoming) {
             bool isRead = fdoc["read"] | false;
@@ -857,11 +945,37 @@ ConversationSummary MessageStore::buildSummaryForPeer(const std::string& peerHex
             if (!summary.hasOutgoing) {
                 summary.hasOutgoing = true;
                 summary.lastOutgoingStatus = status;
-                summary.lastOutgoingCounter = counterFromFilename(fname);
+                summary.lastOutgoingCounter = counter;
             }
             if (isPendingStatus(status)) {
                 summary.hasPending = true;
                 if (summary.pendingCount < UINT16_MAX) summary.pendingCount++;
+                if (pendingOut) {
+                    LXMFMessage msg;
+                    std::string srcHex = fdoc["src"] | "";
+                    std::string dstHex = fdoc["dst"] | "";
+                    if (!srcHex.empty()) {
+                        msg.sourceHash = RNS::Bytes();
+                        msg.sourceHash.assignHex(srcHex.c_str());
+                    }
+                    if (!dstHex.empty()) {
+                        msg.destHash = RNS::Bytes();
+                        msg.destHash.assignHex(dstHex.c_str());
+                    }
+                    msg.timestamp = fdoc["ts"] | 0.0;
+                    msg.content = fdoc["content"] | "";
+                    msg.title = fdoc["title"] | "";
+                    msg.incoming = fdoc["incoming"] | false;
+                    msg.status = status;
+                    msg.read = fdoc["read"] | false;
+                    msg.savedCounter = counter;
+                    std::string msgIdHex = fdoc["msgid"] | "";
+                    if (!msgIdHex.empty()) {
+                        msg.messageId = RNS::Bytes();
+                        msg.messageId.assignHex(msgIdHex.c_str());
+                    }
+                    pendingOut->push_back(msg);
+                }
             }
             if (status == LXMFStatus::FAILED) {
                 summary.hasFailed = true;
@@ -915,12 +1029,36 @@ void MessageStore::updateSummaryStatus(const std::string& peerHex, uint32_t coun
 
 void MessageStore::buildSummaries() {
     _summaries.clear();
+    _startupPendingOutgoing.clear();
+    _startupRecentMessageIds.clear();
+    std::vector<std::pair<uint32_t, std::string>> recentIds;
     for (const auto& peerHex : _conversations) {
-        _summaries[peerHex] = buildSummaryForPeer(peerHex);
+        _summaries[peerHex] = buildSummaryForPeer(peerHex, &_startupPendingOutgoing, &recentIds);
         yield();
     }
 
+    std::sort(_startupPendingOutgoing.begin(), _startupPendingOutgoing.end(),
+        [](const LXMFMessage& a, const LXMFMessage& b) {
+            return a.savedCounter < b.savedCounter;
+        });
+
+    std::sort(recentIds.begin(), recentIds.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::set<std::string> seen;
+    for (const auto& item : recentIds) {
+        if (seen.insert(item.second).second) _startupRecentMessageIds.push_back(item.second);
+    }
+
     Serial.printf("[MSGSTORE] Built summaries for %d conversations\n", (int)_summaries.size());
+}
+
+std::vector<std::string> MessageStore::startupRecentMessageIds(size_t maxIds) const {
+    if (maxIds == 0 || _startupRecentMessageIds.size() <= maxIds) {
+        return _startupRecentMessageIds;
+    }
+    return std::vector<std::string>(
+        _startupRecentMessageIds.end() - maxIds,
+        _startupRecentMessageIds.end());
 }
 
 const ConversationSummary* MessageStore::getSummary(const std::string& peerHex) const {

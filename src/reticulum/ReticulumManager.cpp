@@ -1,10 +1,13 @@
 // Direct port from Ratputer — microReticulum integration
 #include "ReticulumManager.h"
 #include "config/Config.h"
+#include "util/PerfTrace.h"
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <unordered_map>
 #include <string>
+#include <cstring>
+#include <utility>
 
 uint32_t ReticulumManager::_announceFilterCount = 0;
 
@@ -22,6 +25,7 @@ size_t LittleFSFileSystem::read_file(const char* p, RNS::Bytes& data) {
 }
 
 size_t LittleFSFileSystem::write_file(const char* p, const RNS::Bytes& data) {
+    unsigned long traceStart = PerfTrace::nowMs();
     String path = String(p);
     int lastSlash = path.lastIndexOf('/');
     if (lastSlash > 0) {
@@ -29,9 +33,15 @@ size_t LittleFSFileSystem::write_file(const char* p, const RNS::Bytes& data) {
         if (!LittleFS.exists(dir.c_str())) { LittleFS.mkdir(dir.c_str()); }
     }
     File f = LittleFS.open(p, "w");
-    if (!f) return 0;
+    if (!f) {
+        PerfTrace::logWrite("flash", "rns-write-file", p, data.size(), false,
+                            PerfTrace::elapsedMs(traceStart));
+        return 0;
+    }
     size_t w = f.write(data.data(), data.size());
     f.close();
+    PerfTrace::logWrite("flash", "rns-write-file", p, data.size(), w == data.size(),
+                        PerfTrace::elapsedMs(traceStart));
     return w;
 }
 
@@ -43,8 +53,16 @@ namespace {
 constexpr size_t RNS_COPY_CHUNK = 512;
 
 bool copySDToFlash(const char* sdPath, const char* flashPath) {
+    unsigned long traceStart = PerfTrace::nowMs();
+    size_t copied = 0;
+    auto finish = [&](bool ok) -> bool {
+        PerfTrace::logWrite("flash", "copy-sd-to-flash", flashPath, copied, ok,
+                            PerfTrace::elapsedMs(traceStart));
+        return ok;
+    };
+
     File in = SD.open(sdPath, FILE_READ);
-    if (!in) return false;
+    if (!in) return finish(false);
 
     String path = String(flashPath);
     int lastSlash = path.lastIndexOf('/');
@@ -54,7 +72,7 @@ bool copySDToFlash(const char* sdPath, const char* flashPath) {
     }
 
     File out = LittleFS.open(flashPath, "w");
-    if (!out) { in.close(); return false; }
+    if (!out) { in.close(); return finish(false); }
 
     uint8_t buf[RNS_COPY_CHUNK];
     bool ok = true;
@@ -62,31 +80,40 @@ bool copySDToFlash(const char* sdPath, const char* flashPath) {
         size_t n = in.read(buf, sizeof(buf));
         if (n == 0) break;
         if (out.write(buf, n) != n) { ok = false; break; }
+        copied += n;
         RNS::Utilities::OS::reset_watchdog();
     }
     in.close();
     out.close();
     if (!ok) LittleFS.remove(flashPath);
-    return ok;
+    return finish(ok);
 }
 
 bool copyFlashToSD(SDStore* sd, const char* flashPath, const char* sdPath) {
-    if (!sd || !sd->isReady()) return false;
+    unsigned long traceStart = PerfTrace::nowMs();
+    size_t copied = 0;
+    auto finish = [&](bool ok) -> bool {
+        PerfTrace::logWrite("sd", "copy-flash-to-sd", sdPath, copied, ok,
+                            PerfTrace::elapsedMs(traceStart));
+        return ok;
+    };
+
+    if (!sd || !sd->isReady()) return finish(false);
     File in = LittleFS.open(flashPath, "r");
-    if (!in || in.size() == 0) { if (in) in.close(); return false; }
+    if (!in || in.size() == 0) { if (in) in.close(); return finish(false); }
 
     String path = String(sdPath);
     int lastSlash = path.lastIndexOf('/');
     if (lastSlash > 0) {
         String dir = path.substring(0, lastSlash);
-        if (!sd->ensureDir(dir.c_str())) { in.close(); return false; }
+        if (!sd->ensureDir(dir.c_str())) { in.close(); return finish(false); }
     }
 
     String tmpPath = path + ".tmp";
     String bakPath = path + ".bak";
     SD.remove(tmpPath.c_str());
     File out = SD.open(tmpPath.c_str(), FILE_WRITE);
-    if (!out) { in.close(); return false; }
+    if (!out) { in.close(); return finish(false); }
 
     uint8_t buf[RNS_COPY_CHUNK];
     bool ok = true;
@@ -94,12 +121,13 @@ bool copyFlashToSD(SDStore* sd, const char* flashPath, const char* sdPath) {
         size_t n = in.read(buf, sizeof(buf));
         if (n == 0) break;
         if (out.write(buf, n) != n) { ok = false; break; }
+        copied += n;
         RNS::Utilities::OS::reset_watchdog();
     }
     in.close();
     out.close();
 
-    if (!ok) { SD.remove(tmpPath.c_str()); return false; }
+    if (!ok) { SD.remove(tmpPath.c_str()); return finish(false); }
     if (SD.exists(sdPath)) {
         SD.remove(bakPath.c_str());
         SD.rename(sdPath, bakPath.c_str());
@@ -108,24 +136,45 @@ bool copyFlashToSD(SDStore* sd, const char* flashPath, const char* sdPath) {
     if (!SD.rename(tmpPath.c_str(), sdPath)) {
         if (SD.exists(bakPath.c_str())) SD.rename(bakPath.c_str(), sdPath);
         SD.remove(tmpPath.c_str());
-        return false;
+        return finish(false);
     }
     SD.remove(bakPath.c_str());
-    return true;
+    return finish(true);
 }
 
 class LittleFSStreamImpl : public RNS::FileStreamImpl {
 public:
-    LittleFSStreamImpl(File&& f) : _f(std::move(f)) {}
-    ~LittleFSStreamImpl() override { if (_f) _f.close(); }
+    LittleFSStreamImpl(File&& f, const char* path, bool writeMode)
+        : _f(std::move(f)), _writeMode(writeMode), _startMs(PerfTrace::nowMs()) {
+        snprintf(_path, sizeof(_path), "%s", path ? path : "");
+    }
+    ~LittleFSStreamImpl() override { close(); }
 
 protected:
     const char* name() override { return _f ? _f.name() : ""; }
     size_t size() override { return _f ? _f.size() : 0; }
-    void close() override { if (_f) _f.close(); }
+    void close() override {
+        if (!_f) return;
+        _f.close();
+        if (_writeMode && !_logged) {
+            _logged = true;
+            PerfTrace::logWrite("flash", "rns-stream", _path, _bytesWritten, !_writeError,
+                                PerfTrace::elapsedMs(_startMs));
+        }
+    }
 
-    size_t write(uint8_t byte) override { return _f ? _f.write(byte) : 0; }
-    size_t write(const uint8_t* buffer, size_t len) override { return _f ? _f.write(buffer, len) : 0; }
+    size_t write(uint8_t byte) override {
+        size_t written = _f ? _f.write(byte) : 0;
+        _bytesWritten += written;
+        if (written != 1) _writeError = true;
+        return written;
+    }
+    size_t write(const uint8_t* buffer, size_t len) override {
+        size_t written = _f ? _f.write(buffer, len) : 0;
+        _bytesWritten += written;
+        if (written != len) _writeError = true;
+        return written;
+    }
 
     int available() override { return _f ? _f.available() : 0; }
     int read() override { return _f ? _f.read() : -1; }
@@ -134,6 +183,12 @@ protected:
 
 private:
     File _f;
+    char _path[80] = {};
+    bool _writeMode = false;
+    bool _logged = false;
+    bool _writeError = false;
+    size_t _bytesWritten = 0;
+    unsigned long _startMs = 0;
 };
 }  // namespace
 
@@ -149,8 +204,13 @@ RNS::FileStream LittleFSFileSystem::open_file(const char* path, RNS::FileStream:
         }
     }
     File f = LittleFS.open(path, openMode);
-    if (!f) return {RNS::Type::NONE};
-    return RNS::FileStream(new LittleFSStreamImpl(std::move(f)));
+    if (!f) {
+        if (mode != RNS::FileStream::MODE_READ) {
+            PerfTrace::logWrite("flash", "rns-stream-open", path, 0, false, 0);
+        }
+        return {RNS::Type::NONE};
+    }
+    return RNS::FileStream(new LittleFSStreamImpl(std::move(f), path, mode != RNS::FileStream::MODE_READ));
 }
 bool LittleFSFileSystem::remove_file(const char* p) { return LittleFS.remove(p); }
 bool LittleFSFileSystem::rename_file(const char* f, const char* t) { return LittleFS.rename(f, t); }
@@ -352,7 +412,9 @@ void ReticulumManager::loop() {
 // single-threaded transport state. rsPager is an endpoint, not a transport
 // node, so path tables are intentionally not persisted across boots.
 void ReticulumManager::persistData() {
-    unsigned long start = millis();
+    unsigned long start = PerfTrace::nowMs();
+    size_t bytes = 0;
+    bool sdOk = false;
     switch (_persistCycle) {
         case 0:
             RNS::Identity::persist_data();
@@ -363,10 +425,11 @@ void ReticulumManager::persistData() {
                 for (const char* name : files) {
                     File f = LittleFS.open(name, "r");
                     if (f && f.size() > 0) {
+                        bytes += f.size();
                         f.close();
                         char sdPath[64];
                         snprintf(sdPath, sizeof(sdPath), "%s%s", SD_PATH_TRANSPORT, name);
-                        copyFlashToSD(_sd, name, sdPath);
+                        sdOk = copyFlashToSD(_sd, name, sdPath) || sdOk;
                     } else {
                         if (f) f.close();
                     }
@@ -374,7 +437,12 @@ void ReticulumManager::persistData() {
             }
             break;
     }
-    unsigned long dur = millis() - start;
+    unsigned long dur = PerfTrace::elapsedMs(start);
+    if (PerfTrace::shouldLog(dur, RSPAGER_PERF_PERSIST_TRACE_MS) ||
+        (bytes > 0 && _sd && _sd->isReady() && !sdOk)) {
+        RSPAGER_PERF_PRINTF("[PERF] RNS persistData: cycle=%u bytes=%u sd_ok=%d total=%lums\n",
+                            (unsigned)_persistCycle, (unsigned)bytes, sdOk ? 1 : 0, dur);
+    }
     Serial.printf("[PERSIST] Cycle %d done (%lums)\n", _persistCycle, dur);
     if (dur > 500) {
         Serial.printf("[PERSIST] WARNING: Cycle %d blocked for %lums!\n", _persistCycle, dur);

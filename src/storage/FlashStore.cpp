@@ -1,4 +1,5 @@
 #include "FlashStore.h"
+#include "util/PerfTrace.h"
 
 bool FlashStore::begin() {
     // Standalone ratdeck labels this partition "littlefs"; bmorcelli/Launcher
@@ -71,25 +72,31 @@ bool FlashStore::remove(const char* path) {
 }
 
 bool FlashStore::writeAtomic(const char* path, const uint8_t* data, size_t len) {
-    if (!_ready) return false;
+    unsigned long traceStart = PerfTrace::nowMs();
+    auto finish = [&](bool ok) -> bool {
+        PerfTrace::logWrite("flash", "atomic", path, len, ok, PerfTrace::elapsedMs(traceStart));
+        return ok;
+    };
+
+    if (!_ready) return finish(false);
 
     String tmpPath = String(path) + ".tmp";
     String bakPath = String(path) + ".bak";
 
     File f = LittleFS.open(tmpPath.c_str(), "w");
-    if (!f) return false;
+    if (!f) return finish(false);
     size_t written = f.write(data, len);
     f.close();
     if (written != len) {
         LittleFS.remove(tmpPath.c_str());
-        return false;
+        return finish(false);
     }
 
     File verify = LittleFS.open(tmpPath.c_str(), "r");
     if (!verify || verify.size() != len) {
         if (verify) verify.close();
         LittleFS.remove(tmpPath.c_str());
-        return false;
+        return finish(false);
     }
     verify.close();
 
@@ -102,13 +109,13 @@ bool FlashStore::writeAtomic(const char* path, const uint8_t* data, size_t len) 
         if (LittleFS.exists(bakPath.c_str())) {
             LittleFS.rename(bakPath.c_str(), path);
         }
-        return false;
+        return finish(false);
     }
 
     // Clean up backup file after successful write
     LittleFS.remove(bakPath.c_str());
 
-    return true;
+    return finish(true);
 }
 
 bool FlashStore::readFile(const char* path, uint8_t* buffer, size_t maxLen, size_t& bytesRead) {

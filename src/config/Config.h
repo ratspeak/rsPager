@@ -6,8 +6,8 @@
 
 #define RATPAGER_VERSION_MAJOR  1
 #define RATPAGER_VERSION_MINOR  0
-#define RATPAGER_VERSION_PATCH  3
-#define RATPAGER_VERSION_STRING "1.0.3"
+#define RATPAGER_VERSION_PATCH  4
+#define RATPAGER_VERSION_STRING "1.0.4"
 
 // Keep the proven Ratdeck application layer compiling while the T-Pager target
 // is split out. Legacy storage paths keep the ratpager namespace for migration.

@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "LvTheme.h"
 #include "LvInput.h"
+#include "util/PerfTrace.h"
 
 // --- LvScreen base ---
 
@@ -43,26 +44,56 @@ void UIManager::begin() {
 void UIManager::setScreen(LvScreen* screen) {
     if (_currentLvScreen == screen) return;
 
+    const char* fromTitle = _currentLvScreen ? _currentLvScreen->title() : "none";
+    const char* toTitle = screen ? screen->title() : "none";
+    unsigned long startMs = PerfTrace::nowMs();
+    unsigned long phaseMs = 0;
+    unsigned long exitMs = 0;
+    unsigned long destroyMs = 0;
+    unsigned long shellMs = 0;
+    unsigned long cleanMs = 0;
+    unsigned long createMs = 0;
+    unsigned long enterMs = 0;
+
     // Transition from previous LVGL screen
     if (_currentLvScreen) {
+        phaseMs = PerfTrace::nowMs();
         _currentLvScreen->onExit();
+        exitMs = PerfTrace::elapsedMs(phaseMs);
+        phaseMs = PerfTrace::nowMs();
         _currentLvScreen->destroyUI();
+        destroyMs = PerfTrace::elapsedMs(phaseMs);
     }
 
     _currentLvScreen = screen;
 
     // Show LVGL layers
+    phaseMs = PerfTrace::nowMs();
     if (!_bootMode) {
         lv_obj_clear_flag(_lvStatusBar.obj(), LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(_lvTabBar.obj(), LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_clear_flag(_lvContent, LV_OBJ_FLAG_HIDDEN);
+    shellMs = PerfTrace::elapsedMs(phaseMs);
 
     if (_currentLvScreen) {
         // Clean content area
+        phaseMs = PerfTrace::nowMs();
         lv_obj_clean(_lvContent);
+        cleanMs = PerfTrace::elapsedMs(phaseMs);
+        phaseMs = PerfTrace::nowMs();
         _currentLvScreen->createUI(_lvContent);
+        createMs = PerfTrace::elapsedMs(phaseMs);
+        phaseMs = PerfTrace::nowMs();
         _currentLvScreen->onEnter();
+        enterMs = PerfTrace::elapsedMs(phaseMs);
+    }
+
+    unsigned long elapsed = PerfTrace::elapsedMs(startMs);
+    if (PerfTrace::shouldLog(elapsed, RSPAGER_PERF_UI_TRACE_MS)) {
+        RSPAGER_PERF_PRINTF("[PERF] UI transition: from=%s to=%s total=%lums exit=%lums destroy=%lums shell=%lums clean=%lums create=%lums enter=%lums\n",
+                            fromTitle, toTitle, elapsed,
+                            exitMs, destroyMs, shellMs, cleanMs, createMs, enterMs);
     }
 }
 
