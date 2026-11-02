@@ -6,17 +6,22 @@
 
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#install)
 [![Model](https://img.shields.io/badge/model-LilyGo%20T--Pager-success.svg)](https://wiki.lilygo.cc/products/t-lora-series/t-lora-pager/)
-[![Version](https://img.shields.io/badge/version-1.0.4-success.svg)](https://github.com/ratspeak/rsPager/releases)
+[![Legacy version](https://img.shields.io/badge/legacy_version-1.0.4-success.svg)](https://github.com/ratspeak/rsPager/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 [Ratspeak](https://github.com/ratspeak/Ratspeak) |
-[Docs](https://ratspeak.org/docs.html) |
-[Downloads](https://ratspeak.org/download.html) |
+[Current docs](https://docs.ratspeak.org/docs/hardware/handheld-guide) |
+[Legacy releases](https://github.com/ratspeak/rsPager/releases) |
 [rsReticulum](https://github.com/ratspeak/rsReticulum)
 
 </div>
 
 ---
+
+**Legacy repository.** Current firmware and development are in
+[Ratspeak Handheld](https://github.com/ratspeak/ratspeak-handheld). The modes,
+controls, radio defaults and build artifacts below describe this retained
+repository; they are not the current handheld release instructions.
 
 rsPager beta v1.0.4 turns a
 [LilyGo T-Pager / T-LoRa-Pager](https://wiki.lilygo.cc/products/t-lora-series/t-lora-pager/)
@@ -26,12 +31,15 @@ for Ratspeak, Sideband, or another Reticulum client over BLE or USB serial.
 
 ## Install
 
-Use the Ratspeak web flasher:
-[ratspeak.org/download.html](https://ratspeak.org/download.html).
+For current firmware, follow the
+[handheld installation guide](https://docs.ratspeak.org/docs/hardware/flashing-firmware)
+and choose **T-Pager** for the SX1262 model in the
+[Ratspeak web flasher](https://ratspeak.org/download.html). The current full
+image is `pager-full.bin`.
 
-Put the T-Pager in download mode with the BOOT button, connect USB-C, then
-flash `rspager-full`. The standalone-only and RNode-only images are release
-artifacts for launcher users or focused testing.
+Back up your identity and messages before changing firmware or layouts. Legacy
+packages from this repository use different names and storage layouts; matching
+a device name does not establish that an update will preserve its data.
 
 ## Modes
 
@@ -60,8 +68,10 @@ contacts.
 - Delivery color: yellow while sending, green after delivery confirmation.
 - Sleep screen: tap BOOT. Wake with any key or the encoder click.
 - Power off: hold BOOT, then confirm. Power back on by holding PWR for about
-  one second or plugging in USB. Holding BOOT for six seconds forces off without
-  the confirm; holding PWR for about 12 seconds hard power-cycles in hardware.
+  one second or plugging in USB. On USB power, shutdown enters deep sleep until
+  USB is unplugged; the encoder click wakes it. Holding BOOT for six seconds
+  forces off without saving pending state. Holding PWR for about 12 seconds
+  hard power-cycles in hardware.
 
 ## Radio Presets
 
@@ -69,16 +79,16 @@ contacts.
 parameters through normal RNode commands, and Standalone mode exposes radio
 settings on-device. Changes apply immediately.
 
-| Preset | SF | BW | CR | TXP | Bitrate | Link budget |
-|---|---:|---:|---:|---:|---:|---:|
-| Short Turbo | 7 | 500 kHz | 4/5 | 14 dBm | 21.99 kbps | 140 dB |
-| Short Fast | 7 | 250 kHz | 4/5 | 14 dBm | 10.84 kbps | 143 dB |
-| Short Slow | 8 | 250 kHz | 4/5 | 14 dBm | 6.25 kbps | 145.5 dB |
-| Medium Fast | 9 | 250 kHz | 4/5 | 17 dBm | 3.52 kbps | 148 dB |
-| Medium Slow | 10 | 250 kHz | 4/5 | 17 dBm | 1.95 kbps | 150.5 dB |
-| Long Turbo | 11 | 500 kHz | 4/8 | 22 dBm | 1.34 kbps | 150 dB |
-| **Long Fast** *(default)* | **11** | **250 kHz** | **4/5** | **22 dBm** | **1.07 kbps** | **153 dB** |
-| Long Moderate | 11 | 125 kHz | 4/8 | 22 dBm | 0.34 kbps | 156 dB |
+| Preset | SF | BW | CR | TXP |
+|---|---:|---:|---:|---:|
+| Short Turbo | 7 | 500 kHz | 4/5 | 14 dBm |
+| Short Fast | 7 | 250 kHz | 4/5 | 14 dBm |
+| Short Slow | 8 | 250 kHz | 4/5 | 14 dBm |
+| Medium Fast | 9 | 250 kHz | 4/5 | 17 dBm |
+| Medium Slow | 10 | 250 kHz | 4/5 | 17 dBm |
+| Long Turbo | 11 | 500 kHz | 4/8 | 22 dBm |
+| **Long Fast** *(default)* | **11** | **250 kHz** | **4/5** | **22 dBm** |
+| Long Moderate | 11 | 125 kHz | 4/8 | 22 dBm |
 
 The supported SX1262 radio is an 850-950 MHz target. 868 MHz and 915 MHz are
 valid software profiles for that hardware range. 433 MHz requires 433 MHz radio
@@ -99,19 +109,30 @@ AP mode exposes a local TCP endpoint for a nearby Reticulum host:
   target_port = 4242
 ```
 
-The bridging UI and interface behavior may change as Ratspeak's client release
-stabilizes.
+This configuration describes the legacy firmware's access point. Join its WiFi
+network first; use the address shown by the device if it differs from the default.
 
 ## Build From Source
+
+These commands build the retained legacy source. Install Git, Make, Python 3
+with virtual-environment support, and Arduino CLI first. Use a fresh checkout:
+packaging replaces files under `dist/`.
 
 ```bash
 git clone https://github.com/ratspeak/rsPager
 cd rsPager
+git checkout 5d5842f47e93a9a9aa25643018608772da54308b
+python3 -m venv .venv
+. .venv/bin/activate
 python3 -m pip install platformio esptool
 make prep-tpager
 make package
-make flash port=/dev/cu.usbmodem3101
 ```
+
+After backing up the device, `make flash PORT=/dev/cu.usbmodemXXXX` builds and
+writes the full legacy image at offset `0x0`. Replace the port with your device
+and close any app using it. A factory write can replace settings; do not assume
+that data from another firmware layout will survive.
 
 Useful build targets:
 
@@ -125,7 +146,7 @@ make rnode-only-image    # standalone RNode merged image
 make package             # release zips and app images
 ```
 
-Release artifacts are written to `dist/`:
+Legacy artifacts are written to `dist/`:
 
 ```text
 dist/rspager-full.zip
@@ -135,8 +156,9 @@ dist/rspager-standalone-app.bin
 dist/rspager-rnode-app.bin
 ```
 
-Use the `.zip` files with the Ratspeak web flasher. The `*-app.bin` files are
-bare app images for external launchers or manual OTA-slot flashing.
+Each `.zip` contains a merged factory image and its legacy flasher manifest.
+The `*-app.bin` files are bare applications for a compatible external launcher
+or a correctly sized OTA slot. Do not write a bare application at offset `0x0`.
 
 ## License
 
